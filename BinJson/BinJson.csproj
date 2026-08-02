@@ -1,0 +1,22 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <LangVersion>9.0</LangVersion>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Krampus.BinJson</RootNamespace>
+    <PackageId>BinJson</PackageId>
+    <Authors>NightTerror1721</Authors>
+    <Description>Compact JSON DOM and binary/text serialization library for .NET.</Description>
+    <PackageTags>json;binary;serialization;dom;unity</PackageTags>
+    <RepositoryUrl>https://github.com/NightTerror1721/BinJson</RepositoryUrl>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\BinJson.SourceGenerators\BinJson.SourceGenerators.csproj"
+                      OutputItemType="Analyzer"
+                      ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,9 @@
+<Solution>
+  <Project Path="BinJson-Tests/BinJson-Tests.csproj" />
+  <Project Path="BinJson.SourceGenerators/BinJson.SourceGenerators.csproj" />
+  <Project Path="BinJson/BinJson.csproj" />
+  <Project Path="examples/ApiDtos/ApiDtos.csproj" />
+  <Project Path="examples/ConfigurationFiles/ConfigurationFiles.csproj" />
+  <Project Path="examples/GameStateSerialization/GameStateSerialization.csproj" />
+  <Project Path="examples/PerformanceComparison/PerformanceComparison.csproj" />
+</Solution>
