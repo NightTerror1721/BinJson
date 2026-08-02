@@ -49,6 +49,9 @@ namespace Krampus.BinJson.SourceGenerators.Models
 
         /// <summary>Name of the static factory method from [BJsonFactoryMethod]. Null if not present.</summary>
         public string? FactoryMethodName { get; set; }
+
+        /// <summary>Parameters of the static factory method. Null or empty if factory is parameterless.</summary>
+        public System.Collections.Generic.List<ConstructorParameterModel>? FactoryMethodParameters { get; set; }
     }
 
     internal enum NamingPolicy

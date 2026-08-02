@@ -320,14 +320,18 @@ namespace Krampus.BinJson.SourceGenerators
                     code.AppendLine();
                 }
 
-                // Handle constructor-based deserialization
-                if (model.Constructor != null && !model.Constructor.IsParameterless)
+                // Handle constructor-based or factory-method-based deserialization
+                var hasParameterizedFactory = !string.IsNullOrEmpty(model.Configuration.FactoryMethodName)
+                    && model.Configuration.FactoryMethodParameters != null
+                    && model.Configuration.FactoryMethodParameters.Count > 0;
+
+                if ((model.Constructor != null && !model.Constructor.IsParameterless) || hasParameterizedFactory)
                 {
-                    EmitConstructorDeserialization(code, model, members, requiredMembers);
+                    EmitConstructorOrFactoryDeserialization(code, model, members, requiredMembers);
                 }
                 else
                 {
-                    // Parameterless constructor or value type
+                    // Parameterless constructor, parameterless factory, or value type
                     EmitParameterlessDeserialization(code, model, members, requiredMembers);
                 }
 
@@ -350,14 +354,24 @@ namespace Krampus.BinJson.SourceGenerators
             }
         }
 
-        private static void EmitConstructorDeserialization(CodeBuilder code, GeneratedTypeModel model, List<MemberModel> members, List<MemberModel> requiredMembers)
+        private static void EmitConstructorOrFactoryDeserialization(CodeBuilder code, GeneratedTypeModel model, List<MemberModel> members, List<MemberModel> requiredMembers)
         {
-            var constructor = model.Constructor!;
+            // Prefer factory method parameters over constructor if both exist
+            var parameters = model.Configuration.FactoryMethodParameters ?? model.Constructor?.Parameters;
+            var isUsingFactory = !string.IsNullOrEmpty(model.Configuration.FactoryMethodName) 
+                && model.Configuration.FactoryMethodParameters != null;
 
-            code.Comment("Extract constructor parameters");
+            if (parameters == null || parameters.Count == 0)
+            {
+                // Fallback to parameterless if something went wrong
+                EmitParameterlessDeserialization(code, model, members, requiredMembers);
+                return;
+            }
 
-            // Extract each constructor parameter from JSON
-            foreach (var param in constructor.Parameters)
+            code.Comment(isUsingFactory ? "Extract factory method parameters" : "Extract constructor parameters");
+
+            // Extract each parameter from JSON
+            foreach (var param in parameters)
             {
                 // Use the pre-matched JsonName from parameter matching
                 var jsonName = param.JsonName ?? param.ParameterName;
@@ -369,22 +383,22 @@ namespace Krampus.BinJson.SourceGenerators
             }
 
             code.AppendLine();
-            code.Comment("Create instance via constructor");
+            code.Comment(isUsingFactory ? "Create instance via factory method" : "Create instance via constructor");
 
-            var paramList = string.Join(", ", constructor.Parameters.Select(p => p.ParameterName));
+            var paramList = string.Join(", ", parameters.Select(p => p.ParameterName));
             if (!string.IsNullOrEmpty(model.Configuration.FactoryMethodName))
                 code.AppendLine($"var instance = {model.TypeName}.{model.Configuration.FactoryMethodName}({paramList});");
             else
                 code.AppendLine($"var instance = new {model.TypeName}({paramList});");
             code.AppendLine();
 
-            // Set remaining properties not in constructor
-            var constructorParamNames = new HashSet<string>(
-                constructor.Parameters.Select(p => p.ParameterName),
+            // Set remaining properties not in constructor/factory parameters
+            var paramNames = new HashSet<string>(
+                parameters.Select(p => p.ParameterName),
                 StringComparer.OrdinalIgnoreCase);
 
             var remainingMembers = members
-                .Where(m => !constructorParamNames.Contains(m.MemberName))
+                .Where(m => !paramNames.Contains(m.MemberName))
                 .ToList();
 
             if (remainingMembers.Any())

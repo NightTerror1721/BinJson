@@ -99,6 +99,14 @@ PlayerSave save = BJson.Deserialize<PlayerSave>(bson)!;
 
 The source generator automatically emits a zero-reflection serializer for the type.
 
+### Important: Helper Method Visibility
+
+When using attributes that reference static methods (`[BJsonIgnoreWhen]`, `[BJsonValueMapper]`, `[BJsonDefaultProvider]`, `[BJsonFactoryMethod]`), those methods **must be `internal` or `public`** — they cannot be `private`.
+
+**Why:** The source generator emits a separate serializer class (e.g., `PlayerSave_BJsonSerializer`) in the same assembly and namespace. This class needs to call your helper methods directly, so `private` visibility will cause compilation errors.
+
+**Recommendation:** Use `internal` for helper methods to keep them hidden from external assemblies while allowing the generated serializer to access them.
+
 ---
 
 ## Member Control
@@ -211,6 +219,8 @@ static bool MethodName(object? value, string propertyName, IComparable? version)
 - `version` — the active document version from `[BJsonVersionContext]`, or `null` if none.
 - Returns `true` to **ignore** the member for the current operation.
 
+**Visibility requirement:** The method must be `internal` or `public` (not `private`) because the source generator emits a separate serializer class in the same assembly.
+
 ```csharp
 [BJsonSerializable]
 [BJsonVersionContext(typeof(Version), "2.0.0")]
@@ -219,7 +229,7 @@ public class PlayerSave
 	[BJsonIgnoreWhen(nameof(ShouldIgnoreScore))]
 	public int Score { get; set; }
 
-	private static bool ShouldIgnoreScore(object? value, string propertyName, IComparable? version)
+	internal static bool ShouldIgnoreScore(object? value, string propertyName, IComparable? version)
 		=> version != null
 		   && version.CompareTo(new Version("2.0.0")) >= 0
 		   && (int)value! == 0;
@@ -270,16 +280,21 @@ Transforms the member value through a **static method on the same type** both du
 
 **Full signature (preferred):**
 ```csharp
-static object? MethodName(object? value, string propertyName, IComparable? version, bool isReading)
+static BJsonValue MethodName(BJsonValue value, string propertyName, IComparable? version, bool isReading)
 ```
 
 **Fallback signature (no direction flag):**
 ```csharp
-static object? MethodName(object? value, string propertyName, IComparable? version)
+static BJsonValue MethodName(BJsonValue value, string propertyName, IComparable? version)
 ```
 
-- `isReading` — `true` during deserialization, `false` during serialization.
+- `value` — the BJsonValue being read or written.
+- `propertyName` — the CLR member name.
 - `version` — the active document version, or `null` if none.
+- `isReading` — `true` during deserialization, `false` during serialization.
+- Returns the transformed `BJsonValue`.
+
+**Visibility requirement:** The method must be `internal` or `public` (not `private`) because the source generator emits a separate serializer class in the same assembly.
 
 ```csharp
 [BJsonSerializable]
@@ -289,11 +304,14 @@ public class LegacyData
 	[BJsonValueMapper(nameof(MapScore))]
 	public int Score { get; set; }
 
-	private static object? MapScore(object? value, string propertyName, IComparable? version, bool isReading)
+	internal static BJsonValue MapScore(BJsonValue value, string propertyName, IComparable? version, bool isReading)
 	{
 		// v1.x stored score * 10; normalise on read
 		if (isReading && version != null && version.CompareTo(new Version("2.0.0")) < 0)
-			return (int)value! / 10;
+		{
+			var scaledScore = value.IntValue;
+			return BJsonValue.Create(scaledScore / 10);
+		}
 		return value;
 	}
 }
@@ -324,11 +342,13 @@ public bool IsActive { get; set; }
 
 References a **static parameterless method** on the same type for complex or computed defaults:
 
+**Visibility requirement:** The method must be `internal` or `public` (not `private`) because the source generator emits a separate serializer class in the same assembly.
+
 ```csharp
 [BJsonDefaultProvider(nameof(GetDefaultInventory))]
 public Inventory StartInventory { get; set; }
 
-private static Inventory GetDefaultInventory() => new Inventory { Gold = 100 };
+internal static Inventory GetDefaultInventory() => new Inventory { Gold = 100 };
 ```
 
 **Method signatures accepted:**
@@ -464,6 +484,8 @@ The method must be:
 - Return the declaring type (or a subtype)
 - Have parameters whose names match JSON properties (case-insensitive, respecting `NamingPolicy`)
 
+**Visibility requirement:** The method must be `internal` or `public` (not `private`) because the source generator emits a separate serializer class in the same assembly.
+
 ```csharp
 [BJsonSerializable]
 public sealed class Money
@@ -478,18 +500,22 @@ public sealed class Money
 	public string Currency { get; }
 
 	[BJsonFactoryMethod]
-	public static Money Create(decimal amount, string currency) => new(amount, currency);
+	internal static Money Create(decimal amount, string currency) => new(amount, currency);
 }
 ```
 
-**Explicit parameter mapping** (when names cannot be made to match automatically):
+**Parameter matching:**
+- Factory method parameters are matched to JSON properties by name (case-insensitive)
+- The matching respects `[BJsonPropertyName]` and `NamingPolicy` settings
+- If a parameter cannot be matched to a member, it reads directly from the JSON key with the parameter name
+- Parameters are extracted from JSON and passed to the factory method in order
 
+**Parameterless factory methods:**
 ```csharp
-[BJsonFactoryMethod(ParameterMapping = new[] { "x", "coord_x", "y", "coord_y" })]
-public static Point FromCoords(double x, double y) => new() { X = x, Y = y };
+[BJsonFactoryMethod]
+internal static Config CreateDefault() => new Config { Port = 8080 };
 ```
 
-`ParameterMapping` is an alternating array of pairs: `["paramName", "jsonKey", ...]`.
 Only one method per type may carry `[BJsonFactoryMethod]`.
 
 ---

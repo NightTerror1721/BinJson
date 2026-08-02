@@ -157,6 +157,12 @@ namespace Krampus.BinJson.SourceGenerators
                 MatchConstructorParametersToMembers(model.Constructor, model, symbol, diagnostics);
             }
 
+            // Match factory method parameters to members (if factory method is present)
+            if (model.Configuration.FactoryMethodParameters != null && model.Configuration.FactoryMethodParameters.Count > 0)
+            {
+                MatchFactoryParametersToMembers(model.Configuration.FactoryMethodParameters, model, symbol, diagnostics);
+            }
+
             // Validate conflicting JSON names
             ValidateJsonNames(model, symbol, diagnostics);
 
@@ -395,6 +401,64 @@ namespace Krampus.BinJson.SourceGenerators
             var allMembers = model.AllMembers.ToList();
 
             foreach (var param in constructor.Parameters)
+            {
+                // If parameter already has an explicit JsonName from [BJsonPropertyName], use it
+                if (param.JsonName != null)
+                {
+                    // Try to find member with matching JSON name
+                    var memberByJsonName = allMembers.FirstOrDefault(m =>
+                        string.Equals(m.JsonName, param.JsonName, StringComparison.Ordinal));
+
+                    param.MatchingMember = memberByJsonName;
+
+                    if (memberByJsonName == null)
+                    {
+                        // Warning: parameter has explicit name but no matching member
+                        diagnostics.Add(Diagnostic.Create(
+                            BJsonDiagnostics.UnmatchedConstructorParameter,
+                            Location.None,
+                            param.ParameterName,
+                            symbol.Name));
+                    }
+                    continue;
+                }
+
+                // Try to match by parameter name (case-insensitive)
+                var memberByName = allMembers.FirstOrDefault(m =>
+                    string.Equals(m.MemberName, param.ParameterName, StringComparison.OrdinalIgnoreCase));
+
+                if (memberByName != null)
+                {
+                    param.MatchingMember = memberByName;
+                    param.JsonName = memberByName.JsonName ?? memberByName.MemberName;
+                }
+                else
+                {
+                    // No matching member found - parameter will use its own name as JSON key
+                    param.JsonName = param.ParameterName;
+
+                    // Warning: parameter cannot be matched to any member
+                    diagnostics.Add(Diagnostic.Create(
+                        BJsonDiagnostics.UnmatchedConstructorParameter,
+                        Location.None,
+                        param.ParameterName,
+                        symbol.Name));
+                }
+            }
+        }
+
+        /// <summary>
+        /// Match factory method parameters to type members
+        /// </summary>
+        private static void MatchFactoryParametersToMembers(
+            List<ConstructorParameterModel> parameters,
+            GeneratedTypeModel model,
+            INamedTypeSymbol symbol,
+            List<Diagnostic> diagnostics)
+        {
+            var allMembers = model.AllMembers.ToList();
+
+            foreach (var param in parameters)
             {
                 // If parameter already has an explicit JsonName from [BJsonPropertyName], use it
                 if (param.JsonName != null)

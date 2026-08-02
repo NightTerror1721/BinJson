@@ -115,7 +115,24 @@ namespace Krampus.BinJson.SourceGenerators.Utilities
             // Check for [BJsonFactoryMethod] on any static method
             var factoryMethod = FindFactoryMethod(typeSymbol);
             if (factoryMethod != null)
+            {
                 config.FactoryMethodName = factoryMethod.Name;
+
+                // Capture factory method parameters if any
+                if (factoryMethod.Parameters.Length > 0)
+                {
+                    config.FactoryMethodParameters = new System.Collections.Generic.List<ConstructorParameterModel>();
+                    foreach (var param in factoryMethod.Parameters)
+                    {
+                        var paramModel = new ConstructorParameterModel(
+                            param.Name,
+                            param.Type.ToDisplayString(),
+                            param.Type.NullableAnnotation == Microsoft.CodeAnalysis.NullableAnnotation.Annotated);
+
+                        config.FactoryMethodParameters.Add(paramModel);
+                    }
+                }
+            }
 
             return config;
         }
