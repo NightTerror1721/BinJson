@@ -45,6 +45,8 @@ namespace Krampus.BinJson
 
         public ReadOnlySpan<byte> AsSpan() => _data.AsSpan();
 
+        public ReadOnlyMemory<byte> AsMemory() => _data;
+
         public byte[] ToArray() => (byte[])_data.Clone();
 
         public void CopyTo(byte[] destination, int destinationIndex = 0)

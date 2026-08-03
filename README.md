@@ -393,4 +393,5 @@ The project includes basic performance tests (`BJsonPerformanceTests`) that veri
 - Binary specification: `docs/BinaryFormat.md`
 - Unity integration guide: `docs/UnitySetup.md`
 - Extensibility guide: `docs/Extensibility.md`
+- Error handling and error code catalog: `docs/ErrorHandling.md`
 - **Attribute system reference & tutorial: `docs/Attributes.md`**

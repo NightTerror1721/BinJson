@@ -16,6 +16,11 @@ namespace Krampus.BinJson.Binary
 
         private readonly Stream _stream;
         private readonly bool _leaveOpen;
+        private readonly byte[] _singleByteBuffer;
+        private readonly byte[] _numericBuffer;
+        private PathSegment[] _pathSegments;
+        private int _pathDepth;
+        private long _bytesWritten;
 
         public BJsonBinaryWriter(Stream stream, bool leaveOpen = false)
         {
@@ -26,6 +31,11 @@ namespace Krampus.BinJson.Binary
 
             _stream = stream;
             _leaveOpen = leaveOpen;
+            _singleByteBuffer = new byte[1];
+            _numericBuffer = new byte[8];
+            _pathSegments = Array.Empty<PathSegment>();
+            _pathDepth = 0;
+            _bytesWritten = 0;
         }
 
         public void Write(BJsonValue value)
@@ -36,7 +46,7 @@ namespace Krampus.BinJson.Binary
             }
             catch (Exception ex) when (ex is not BJsonException)
             {
-                throw new BJsonSerializationException("Failed to serialize BinJson value to binary format.", ex);
+                throw CreateSerializationException("Failed to serialize BinJson value to binary format.", "WriteValue", ex);
             }
         }
 
@@ -48,7 +58,7 @@ namespace Krampus.BinJson.Binary
             }
             catch (Exception ex) when (ex is not BJsonException)
             {
-                throw new BJsonSerializationException("Failed to serialize BinJson value to binary format.", ex);
+                throw CreateSerializationException("Failed to serialize BinJson value to binary format.", "WriteValueAsync", ex);
             }
         }
 
@@ -60,7 +70,7 @@ namespace Krampus.BinJson.Binary
             }
             catch (Exception ex) when (ex is not BJsonException)
             {
-                throw new BJsonSerializationException("Failed to flush binary BinJson writer.", ex);
+                throw CreateSerializationException("Failed to flush binary BinJson writer.", "Flush", ex);
             }
         }
 
@@ -72,7 +82,7 @@ namespace Krampus.BinJson.Binary
             }
             catch (Exception ex) when (ex is not BJsonException)
             {
-                throw new BJsonSerializationException("Failed to flush binary BinJson writer.", ex);
+                throw CreateSerializationException("Failed to flush binary BinJson writer.", "FlushAsync", ex);
             }
         }
 
@@ -143,7 +153,7 @@ namespace Krampus.BinJson.Binary
                     WriteBinary(value.BinaryValue);
                     return;
                 default:
-                    throw new BJsonSerializationException($"Unsupported BJsonValueType: {value.Type}");
+                    throw CreateSerializationException($"Unsupported BJsonValueType: {value.Type}", "WriteValue");
             }
         }
 
@@ -176,7 +186,7 @@ namespace Krampus.BinJson.Binary
                     await WriteBinaryAsync(value.BinaryValue, cancellationToken).ConfigureAwait(false);
                     return;
                 default:
-                    throw new BJsonSerializationException($"Unsupported BJsonValueType: {value.Type}");
+                    throw CreateSerializationException($"Unsupported BJsonValueType: {value.Type}", "WriteValueAsync");
             }
         }
 
@@ -327,7 +337,15 @@ namespace Krampus.BinJson.Binary
 
             for (int i = 0; i < array.Count; i++)
             {
-                WriteValue(array[i]);
+                PushIndexPathSegment(i);
+                try
+                {
+                    WriteValue(array[i]);
+                }
+                finally
+                {
+                    PopPathSegment();
+                }
             }
         }
 
@@ -338,7 +356,15 @@ namespace Krampus.BinJson.Binary
 
             for (int i = 0; i < array.Count; i++)
             {
-                await WriteValueAsync(array[i], cancellationToken).ConfigureAwait(false);
+                PushIndexPathSegment(i);
+                try
+                {
+                    await WriteValueAsync(array[i], cancellationToken).ConfigureAwait(false);
+                }
+                finally
+                {
+                    PopPathSegment();
+                }
             }
         }
 
@@ -350,7 +376,15 @@ namespace Krampus.BinJson.Binary
             foreach (var pair in obj)
             {
                 WriteStringData(pair.Key);
-                WriteValue(pair.Value);
+                PushPropertyPathSegment(pair.Key);
+                try
+                {
+                    WriteValue(pair.Value);
+                }
+                finally
+                {
+                    PopPathSegment();
+                }
             }
         }
 
@@ -362,7 +396,15 @@ namespace Krampus.BinJson.Binary
             foreach (var pair in obj)
             {
                 await WriteStringDataAsync(pair.Key, cancellationToken).ConfigureAwait(false);
-                await WriteValueAsync(pair.Value, cancellationToken).ConfigureAwait(false);
+                PushPropertyPathSegment(pair.Key);
+                try
+                {
+                    await WriteValueAsync(pair.Value, cancellationToken).ConfigureAwait(false);
+                }
+                finally
+                {
+                    PopPathSegment();
+                }
             }
         }
 
@@ -383,13 +425,15 @@ namespace Krampus.BinJson.Binary
             WriteTypeCode(BJsonValueTypeCode.Binary);
             WriteInt32(value.Count);
             _stream.Write(value.AsSpan());
+            _bytesWritten += value.Count;
         }
 
         private async Task WriteBinaryAsync(BJsonBinary value, CancellationToken cancellationToken)
         {
             await WriteTypeCodeAsync(BJsonValueTypeCode.Binary, cancellationToken).ConfigureAwait(false);
             await WriteInt32Async(value.Count, cancellationToken).ConfigureAwait(false);
-            await _stream.WriteAsync(value.AsSpan().ToArray(), 0, value.Count, cancellationToken).ConfigureAwait(false);
+            await _stream.WriteAsync(value.AsMemory(), cancellationToken).ConfigureAwait(false);
+            _bytesWritten += value.Count;
         }
 
         private void WriteStringData(string value)
@@ -397,6 +441,7 @@ namespace Krampus.BinJson.Binary
             byte[] bytes = Utf8.GetBytes(value);
             WriteInt32(bytes.Length);
             _stream.Write(bytes, 0, bytes.Length);
+            _bytesWritten += bytes.Length;
         }
 
         private async Task WriteStringDataAsync(string value, CancellationToken cancellationToken)
@@ -404,11 +449,13 @@ namespace Krampus.BinJson.Binary
             byte[] bytes = Utf8.GetBytes(value);
             await WriteInt32Async(bytes.Length, cancellationToken).ConfigureAwait(false);
             await _stream.WriteAsync(bytes, 0, bytes.Length, cancellationToken).ConfigureAwait(false);
+            _bytesWritten += bytes.Length;
         }
 
         private void WriteTypeCode(BJsonValueTypeCode code)
         {
             _stream.WriteByte((byte)code);
+            _bytesWritten += 1;
         }
 
         private Task WriteTypeCodeAsync(BJsonValueTypeCode code, CancellationToken cancellationToken)
@@ -421,8 +468,9 @@ namespace Krampus.BinJson.Binary
 
         private async Task WriteByteAsync(byte value, CancellationToken cancellationToken)
         {
-            byte[] buffer = { value };
-            await _stream.WriteAsync(buffer, 0, 1, cancellationToken).ConfigureAwait(false);
+            _singleByteBuffer[0] = value;
+            await _stream.WriteAsync(_singleByteBuffer, 0, 1, cancellationToken).ConfigureAwait(false);
+            _bytesWritten += 1;
         }
 
         private void WriteInt16(short value)
@@ -430,13 +478,14 @@ namespace Krampus.BinJson.Binary
             Span<byte> buffer = stackalloc byte[sizeof(short)];
             BinaryPrimitives.WriteInt16LittleEndian(buffer, value);
             _stream.Write(buffer);
+            _bytesWritten += buffer.Length;
         }
 
         private async Task WriteInt16Async(short value, CancellationToken cancellationToken)
         {
-            byte[] buffer = new byte[sizeof(short)];
-            BinaryPrimitives.WriteInt16LittleEndian(buffer, value);
-            await _stream.WriteAsync(buffer, 0, buffer.Length, cancellationToken).ConfigureAwait(false);
+            BinaryPrimitives.WriteInt16LittleEndian(_numericBuffer.AsSpan(0, sizeof(short)), value);
+            await _stream.WriteAsync(_numericBuffer, 0, sizeof(short), cancellationToken).ConfigureAwait(false);
+            _bytesWritten += sizeof(short);
         }
 
         private void WriteUInt16(ushort value)
@@ -444,13 +493,14 @@ namespace Krampus.BinJson.Binary
             Span<byte> buffer = stackalloc byte[sizeof(ushort)];
             BinaryPrimitives.WriteUInt16LittleEndian(buffer, value);
             _stream.Write(buffer);
+            _bytesWritten += buffer.Length;
         }
 
         private async Task WriteUInt16Async(ushort value, CancellationToken cancellationToken)
         {
-            byte[] buffer = new byte[sizeof(ushort)];
-            BinaryPrimitives.WriteUInt16LittleEndian(buffer, value);
-            await _stream.WriteAsync(buffer, 0, buffer.Length, cancellationToken).ConfigureAwait(false);
+            BinaryPrimitives.WriteUInt16LittleEndian(_numericBuffer.AsSpan(0, sizeof(ushort)), value);
+            await _stream.WriteAsync(_numericBuffer, 0, sizeof(ushort), cancellationToken).ConfigureAwait(false);
+            _bytesWritten += sizeof(ushort);
         }
 
         private void WriteInt32(int value)
@@ -458,13 +508,14 @@ namespace Krampus.BinJson.Binary
             Span<byte> buffer = stackalloc byte[sizeof(int)];
             BinaryPrimitives.WriteInt32LittleEndian(buffer, value);
             _stream.Write(buffer);
+            _bytesWritten += buffer.Length;
         }
 
         private async Task WriteInt32Async(int value, CancellationToken cancellationToken)
         {
-            byte[] buffer = new byte[sizeof(int)];
-            BinaryPrimitives.WriteInt32LittleEndian(buffer, value);
-            await _stream.WriteAsync(buffer, 0, buffer.Length, cancellationToken).ConfigureAwait(false);
+            BinaryPrimitives.WriteInt32LittleEndian(_numericBuffer.AsSpan(0, sizeof(int)), value);
+            await _stream.WriteAsync(_numericBuffer, 0, sizeof(int), cancellationToken).ConfigureAwait(false);
+            _bytesWritten += sizeof(int);
         }
 
         private void WriteUInt32(uint value)
@@ -472,13 +523,14 @@ namespace Krampus.BinJson.Binary
             Span<byte> buffer = stackalloc byte[sizeof(uint)];
             BinaryPrimitives.WriteUInt32LittleEndian(buffer, value);
             _stream.Write(buffer);
+            _bytesWritten += buffer.Length;
         }
 
         private async Task WriteUInt32Async(uint value, CancellationToken cancellationToken)
         {
-            byte[] buffer = new byte[sizeof(uint)];
-            BinaryPrimitives.WriteUInt32LittleEndian(buffer, value);
-            await _stream.WriteAsync(buffer, 0, buffer.Length, cancellationToken).ConfigureAwait(false);
+            BinaryPrimitives.WriteUInt32LittleEndian(_numericBuffer.AsSpan(0, sizeof(uint)), value);
+            await _stream.WriteAsync(_numericBuffer, 0, sizeof(uint), cancellationToken).ConfigureAwait(false);
+            _bytesWritten += sizeof(uint);
         }
 
         private void WriteInt64(long value)
@@ -486,13 +538,14 @@ namespace Krampus.BinJson.Binary
             Span<byte> buffer = stackalloc byte[sizeof(long)];
             BinaryPrimitives.WriteInt64LittleEndian(buffer, value);
             _stream.Write(buffer);
+            _bytesWritten += buffer.Length;
         }
 
         private async Task WriteInt64Async(long value, CancellationToken cancellationToken)
         {
-            byte[] buffer = new byte[sizeof(long)];
-            BinaryPrimitives.WriteInt64LittleEndian(buffer, value);
-            await _stream.WriteAsync(buffer, 0, buffer.Length, cancellationToken).ConfigureAwait(false);
+            BinaryPrimitives.WriteInt64LittleEndian(_numericBuffer.AsSpan(0, sizeof(long)), value);
+            await _stream.WriteAsync(_numericBuffer, 0, sizeof(long), cancellationToken).ConfigureAwait(false);
+            _bytesWritten += sizeof(long);
         }
 
         private void WriteUInt64(ulong value)
@@ -500,13 +553,14 @@ namespace Krampus.BinJson.Binary
             Span<byte> buffer = stackalloc byte[sizeof(ulong)];
             BinaryPrimitives.WriteUInt64LittleEndian(buffer, value);
             _stream.Write(buffer);
+            _bytesWritten += buffer.Length;
         }
 
         private async Task WriteUInt64Async(ulong value, CancellationToken cancellationToken)
         {
-            byte[] buffer = new byte[sizeof(ulong)];
-            BinaryPrimitives.WriteUInt64LittleEndian(buffer, value);
-            await _stream.WriteAsync(buffer, 0, buffer.Length, cancellationToken).ConfigureAwait(false);
+            BinaryPrimitives.WriteUInt64LittleEndian(_numericBuffer.AsSpan(0, sizeof(ulong)), value);
+            await _stream.WriteAsync(_numericBuffer, 0, sizeof(ulong), cancellationToken).ConfigureAwait(false);
+            _bytesWritten += sizeof(ulong);
         }
 
         private void WriteSingle(float value)
@@ -514,13 +568,14 @@ namespace Krampus.BinJson.Binary
             Span<byte> buffer = stackalloc byte[sizeof(int)];
             BinaryPrimitives.WriteInt32LittleEndian(buffer, BitConverter.SingleToInt32Bits(value));
             _stream.Write(buffer);
+            _bytesWritten += buffer.Length;
         }
 
         private async Task WriteSingleAsync(float value, CancellationToken cancellationToken)
         {
-            byte[] buffer = new byte[sizeof(int)];
-            BinaryPrimitives.WriteInt32LittleEndian(buffer, BitConverter.SingleToInt32Bits(value));
-            await _stream.WriteAsync(buffer, 0, buffer.Length, cancellationToken).ConfigureAwait(false);
+            BinaryPrimitives.WriteInt32LittleEndian(_numericBuffer.AsSpan(0, sizeof(int)), BitConverter.SingleToInt32Bits(value));
+            await _stream.WriteAsync(_numericBuffer, 0, sizeof(int), cancellationToken).ConfigureAwait(false);
+            _bytesWritten += sizeof(int);
         }
 
         private void WriteDouble(double value)
@@ -528,13 +583,143 @@ namespace Krampus.BinJson.Binary
             Span<byte> buffer = stackalloc byte[sizeof(long)];
             BinaryPrimitives.WriteInt64LittleEndian(buffer, BitConverter.DoubleToInt64Bits(value));
             _stream.Write(buffer);
+            _bytesWritten += buffer.Length;
         }
 
         private async Task WriteDoubleAsync(double value, CancellationToken cancellationToken)
         {
-            byte[] buffer = new byte[sizeof(long)];
-            BinaryPrimitives.WriteInt64LittleEndian(buffer, BitConverter.DoubleToInt64Bits(value));
-            await _stream.WriteAsync(buffer, 0, buffer.Length, cancellationToken).ConfigureAwait(false);
+            BinaryPrimitives.WriteInt64LittleEndian(_numericBuffer.AsSpan(0, sizeof(long)), BitConverter.DoubleToInt64Bits(value));
+            await _stream.WriteAsync(_numericBuffer, 0, sizeof(long), cancellationToken).ConfigureAwait(false);
+            _bytesWritten += sizeof(long);
+        }
+
+        private BJsonSerializationException CreateSerializationException(string message, string operation, Exception? innerException = null)
+        {
+            return new BJsonSerializationException(
+                message,
+                byteOffset: _bytesWritten,
+                operation: operation,
+                documentPath: CurrentPath,
+                errorCode: BJsonErrorCode.BinarySerializationError,
+                innerException: innerException);
+        }
+
+        private string CurrentPath
+        {
+            get
+            {
+                if (_pathDepth == 0)
+                    return "$";
+
+                var builder = new StringBuilder("$");
+                for (int i = 0; i < _pathDepth; i++)
+                {
+                    var segment = _pathSegments[i];
+                    if (segment.IsIndex)
+                    {
+                        builder.Append('[');
+                        builder.Append(segment.Index);
+                        builder.Append(']');
+                    }
+                    else
+                    {
+                        AppendPropertySegment(builder, segment.PropertyName!);
+                    }
+                }
+
+                return builder.ToString();
+            }
+        }
+
+        private void PushIndexPathSegment(int index)
+        {
+            EnsurePathCapacity(_pathDepth + 1);
+            _pathSegments[_pathDepth++] = PathSegment.ForIndex(index);
+        }
+
+        private void PushPropertyPathSegment(string key)
+        {
+            EnsurePathCapacity(_pathDepth + 1);
+            _pathSegments[_pathDepth++] = PathSegment.ForProperty(key);
+        }
+
+        private void PopPathSegment()
+        {
+            if (_pathDepth <= 0)
+                return;
+
+            _pathDepth--;
+            _pathSegments[_pathDepth] = default;
+        }
+
+        private void EnsurePathCapacity(int requiredCapacity)
+        {
+            if (_pathSegments.Length >= requiredCapacity)
+                return;
+
+            int nextSize = _pathSegments.Length == 0 ? 8 : _pathSegments.Length * 2;
+            while (nextSize < requiredCapacity)
+                nextSize *= 2;
+
+            Array.Resize(ref _pathSegments, nextSize);
+        }
+
+        private static void AppendPropertySegment(StringBuilder builder, string key)
+        {
+            if (IsSimpleIdentifier(key))
+            {
+                builder.Append('.');
+                builder.Append(key);
+                return;
+            }
+
+            builder.Append("['");
+            for (int i = 0; i < key.Length; i++)
+            {
+                char c = key[i];
+                if (c == '\\' || c == '\'')
+                    builder.Append('\\');
+                builder.Append(c);
+            }
+            builder.Append("']");
+        }
+
+        private static bool IsSimpleIdentifier(string key)
+        {
+            if (string.IsNullOrEmpty(key))
+                return false;
+
+            if (!(char.IsLetter(key[0]) || key[0] == '_'))
+                return false;
+
+            for (int i = 1; i < key.Length; i++)
+            {
+                char c = key[i];
+                if (!(char.IsLetterOrDigit(c) || c == '_'))
+                    return false;
+            }
+
+            return true;
+        }
+
+        private readonly struct PathSegment
+        {
+            private PathSegment(bool isIndex, int index, string? propertyName)
+            {
+                IsIndex = isIndex;
+                Index = index;
+                PropertyName = propertyName;
+            }
+
+            public bool IsIndex { get; }
+
+            public int Index { get; }
+
+            public string? PropertyName { get; }
+
+            public static PathSegment ForIndex(int index) => new PathSegment(true, index, null);
+
+            public static PathSegment ForProperty(string propertyName) => new PathSegment(false, 0, propertyName);
         }
 
         private static bool CanRoundTripAsSingle(double doubleValue, float singleValue)

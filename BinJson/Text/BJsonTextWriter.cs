@@ -37,7 +37,11 @@ namespace Krampus.BinJson.Text
             }
             catch (Exception ex) when (!(ex is BJsonException))
             {
-                throw new BJsonSerializationException("Failed to serialize BinJson value to JSON text.", ex);
+                throw new BJsonSerializationException(
+                    "Failed to serialize BinJson value to JSON text.",
+                    operation: "Write",
+                    errorCode: BJsonErrorCode.TextSerializationError,
+                    innerException: ex);
             }
         }
 
@@ -58,7 +62,11 @@ namespace Krampus.BinJson.Text
             }
             catch (Exception ex) when (!(ex is BJsonException))
             {
-                throw new BJsonSerializationException("Failed to flush JSON text writer.", ex);
+                throw new BJsonSerializationException(
+                    "Failed to flush JSON text writer.",
+                    operation: "Flush",
+                    errorCode: BJsonErrorCode.TextSerializationError,
+                    innerException: ex);
             }
         }
 
@@ -71,7 +79,11 @@ namespace Krampus.BinJson.Text
             }
             catch (Exception ex) when (!(ex is BJsonException))
             {
-                throw new BJsonSerializationException("Failed to flush JSON text writer.", ex);
+                throw new BJsonSerializationException(
+                    "Failed to flush JSON text writer.",
+                    operation: "FlushAsync",
+                    errorCode: BJsonErrorCode.TextSerializationError,
+                    innerException: ex);
             }
         }
 

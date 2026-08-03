@@ -3,6 +3,7 @@
 using System;
 using System.Buffers.Binary;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -16,6 +17,11 @@ namespace Krampus.BinJson.Binary
 
         private readonly Stream _stream;
         private readonly bool _leaveOpen;
+        private readonly byte[] _singleByteBuffer;
+        private readonly byte[] _numericBuffer;
+        private PathSegment[] _pathSegments;
+        private int _pathDepth;
+        private long _bytesRead;
 
         public BJsonBinaryReader(Stream stream, bool leaveOpen = false)
         {
@@ -26,6 +32,11 @@ namespace Krampus.BinJson.Binary
 
             _stream = stream;
             _leaveOpen = leaveOpen;
+            _singleByteBuffer = new byte[1];
+            _numericBuffer = new byte[8];
+            _pathSegments = Array.Empty<PathSegment>();
+            _pathDepth = 0;
+            _bytesRead = 0;
         }
 
         public BJsonValue Read()
@@ -36,7 +47,7 @@ namespace Krampus.BinJson.Binary
             }
             catch (Exception ex) when (!(ex is BJsonException))
             {
-                throw new BJsonBinaryFormatException("Failed to deserialize binary BinJson payload.", ex);
+                throw CreateFormatException("Failed to deserialize binary BinJson payload.", "Root", ex);
             }
         }
 
@@ -48,7 +59,7 @@ namespace Krampus.BinJson.Binary
             }
             catch (Exception ex) when (!(ex is BJsonException))
             {
-                throw new BJsonBinaryFormatException("Failed to deserialize binary BinJson payload.", ex);
+                throw CreateFormatException("Failed to deserialize binary BinJson payload.", "Root", ex);
             }
         }
 
@@ -79,9 +90,19 @@ namespace Krampus.BinJson.Binary
 
         public static async Task<BJsonValue> DeserializeAsync(ReadOnlyMemory<byte> data, CancellationToken cancellationToken = default)
         {
-            using var stream = new MemoryStream(data.ToArray(), writable: false);
+            using var stream = CreateReadOnlyMemoryStream(data);
             using var reader = new BJsonBinaryReader(stream, leaveOpen: true);
             return await reader.ReadAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        private static MemoryStream CreateReadOnlyMemoryStream(ReadOnlyMemory<byte> data)
+        {
+            if (MemoryMarshal.TryGetArray(data, out ArraySegment<byte> segment) && segment.Array is not null)
+            {
+                return new MemoryStream(segment.Array, segment.Offset, segment.Count, writable: false, publiclyVisible: true);
+            }
+
+            return new MemoryStream(data.ToArray(), writable: false);
         }
 
         private BJsonValue ReadValue()
@@ -125,7 +146,13 @@ namespace Krampus.BinJson.Binary
                 case BJsonValueTypeCode.Binary:
                     return BJsonValue.Create(ReadBinary());
                 default:
-                    throw new BJsonBinaryFormatException($"Invalid BJson type code: 0x{(byte)typeCode:X2}");
+                    throw CreateFormatException(
+                        $"Invalid BJson type code: 0x{(byte)typeCode:X2}",
+                        "TypeCode",
+                        details: new System.Collections.Generic.Dictionary<string, object?>
+                        {
+                            ["typeCode"] = (byte)typeCode
+                        });
             }
         }
 
@@ -170,7 +197,13 @@ namespace Krampus.BinJson.Binary
                 case BJsonValueTypeCode.Binary:
                     return BJsonValue.Create(await ReadBinaryAsync(cancellationToken).ConfigureAwait(false));
                 default:
-                    throw new BJsonBinaryFormatException($"Invalid BJson type code: 0x{(byte)typeCode:X2}");
+                    throw CreateFormatException(
+                        $"Invalid BJson type code: 0x{(byte)typeCode:X2}",
+                        "TypeCode",
+                        details: new System.Collections.Generic.Dictionary<string, object?>
+                        {
+                            ["typeCode"] = (byte)typeCode
+                        });
             }
         }
 
@@ -181,7 +214,15 @@ namespace Krampus.BinJson.Binary
 
             for (int i = 0; i < count; i++)
             {
-                array.Add(ReadValue());
+                PushIndexPathSegment(i);
+                try
+                {
+                    array.Add(ReadValue());
+                }
+                finally
+                {
+                    PopPathSegment();
+                }
             }
 
             return array;
@@ -194,7 +235,15 @@ namespace Krampus.BinJson.Binary
 
             for (int i = 0; i < count; i++)
             {
-                array.Add(await ReadValueAsync(cancellationToken).ConfigureAwait(false));
+                PushIndexPathSegment(i);
+                try
+                {
+                    array.Add(await ReadValueAsync(cancellationToken).ConfigureAwait(false));
+                }
+                finally
+                {
+                    PopPathSegment();
+                }
             }
 
             return array;
@@ -209,9 +258,23 @@ namespace Krampus.BinJson.Binary
             {
                 string key = ReadStringData();
                 if (obj.ContainsKey(key))
-                    throw new BJsonBinaryFormatException($"Duplicate object key '{key}' is not allowed.");
+                    throw CreateFormatException(
+                        $"Duplicate object key '{key}' is not allowed.",
+                        "Object",
+                        details: new System.Collections.Generic.Dictionary<string, object?>
+                        {
+                            ["key"] = key
+                        });
 
-                obj.Add(key, ReadValue());
+                PushPropertyPathSegment(key);
+                try
+                {
+                    obj.Add(key, ReadValue());
+                }
+                finally
+                {
+                    PopPathSegment();
+                }
             }
 
             return obj;
@@ -226,9 +289,23 @@ namespace Krampus.BinJson.Binary
             {
                 string key = await ReadStringDataAsync(cancellationToken).ConfigureAwait(false);
                 if (obj.ContainsKey(key))
-                    throw new BJsonBinaryFormatException($"Duplicate object key '{key}' is not allowed.");
+                    throw CreateFormatException(
+                        $"Duplicate object key '{key}' is not allowed.",
+                        "Object",
+                        details: new System.Collections.Generic.Dictionary<string, object?>
+                        {
+                            ["key"] = key
+                        });
 
-                obj.Add(key, await ReadValueAsync(cancellationToken).ConfigureAwait(false));
+                PushPropertyPathSegment(key);
+                try
+                {
+                    obj.Add(key, await ReadValueAsync(cancellationToken).ConfigureAwait(false));
+                }
+                finally
+                {
+                    PopPathSegment();
+                }
             }
 
             return obj;
@@ -272,17 +349,18 @@ namespace Krampus.BinJson.Binary
         {
             int value = _stream.ReadByte();
             if (value < 0)
-                throw new BJsonBinaryFormatException("Unexpected end of stream while reading BinJson data.");
+                throw CreateFormatException("Unexpected end of stream while reading BinJson data.", "ReadByte");
+            _bytesRead += 1;
             return (byte)value;
         }
 
         private async Task<byte> ReadByteAsync(CancellationToken cancellationToken)
         {
-            byte[] buffer = new byte[1];
-            int read = await _stream.ReadAsync(buffer, 0, 1, cancellationToken).ConfigureAwait(false);
+            int read = await _stream.ReadAsync(_singleByteBuffer, 0, 1, cancellationToken).ConfigureAwait(false);
             if (read <= 0)
-                throw new BJsonBinaryFormatException("Unexpected end of stream while reading BinJson data.");
-            return buffer[0];
+                throw CreateFormatException("Unexpected end of stream while reading BinJson data.", "ReadByte");
+            _bytesRead += read;
+            return _singleByteBuffer[0];
         }
 
         private short ReadInt16()
@@ -294,9 +372,8 @@ namespace Krampus.BinJson.Binary
 
         private async Task<short> ReadInt16Async(CancellationToken cancellationToken)
         {
-            byte[] buffer = new byte[sizeof(short)];
-            await ReadExactlyAsync(buffer, cancellationToken).ConfigureAwait(false);
-            return BinaryPrimitives.ReadInt16LittleEndian(buffer);
+            await ReadExactlyAsync(_numericBuffer, sizeof(short), cancellationToken).ConfigureAwait(false);
+            return BinaryPrimitives.ReadInt16LittleEndian(_numericBuffer.AsSpan(0, sizeof(short)));
         }
 
         private ushort ReadUInt16()
@@ -308,9 +385,8 @@ namespace Krampus.BinJson.Binary
 
         private async Task<ushort> ReadUInt16Async(CancellationToken cancellationToken)
         {
-            byte[] buffer = new byte[sizeof(ushort)];
-            await ReadExactlyAsync(buffer, cancellationToken).ConfigureAwait(false);
-            return BinaryPrimitives.ReadUInt16LittleEndian(buffer);
+            await ReadExactlyAsync(_numericBuffer, sizeof(ushort), cancellationToken).ConfigureAwait(false);
+            return BinaryPrimitives.ReadUInt16LittleEndian(_numericBuffer.AsSpan(0, sizeof(ushort)));
         }
 
         private int ReadInt32()
@@ -322,9 +398,8 @@ namespace Krampus.BinJson.Binary
 
         private async Task<int> ReadInt32Async(CancellationToken cancellationToken)
         {
-            byte[] buffer = new byte[sizeof(int)];
-            await ReadExactlyAsync(buffer, cancellationToken).ConfigureAwait(false);
-            return BinaryPrimitives.ReadInt32LittleEndian(buffer);
+            await ReadExactlyAsync(_numericBuffer, sizeof(int), cancellationToken).ConfigureAwait(false);
+            return BinaryPrimitives.ReadInt32LittleEndian(_numericBuffer.AsSpan(0, sizeof(int)));
         }
 
         private uint ReadUInt32()
@@ -336,9 +411,8 @@ namespace Krampus.BinJson.Binary
 
         private async Task<uint> ReadUInt32Async(CancellationToken cancellationToken)
         {
-            byte[] buffer = new byte[sizeof(uint)];
-            await ReadExactlyAsync(buffer, cancellationToken).ConfigureAwait(false);
-            return BinaryPrimitives.ReadUInt32LittleEndian(buffer);
+            await ReadExactlyAsync(_numericBuffer, sizeof(uint), cancellationToken).ConfigureAwait(false);
+            return BinaryPrimitives.ReadUInt32LittleEndian(_numericBuffer.AsSpan(0, sizeof(uint)));
         }
 
         private long ReadInt64()
@@ -350,9 +424,8 @@ namespace Krampus.BinJson.Binary
 
         private async Task<long> ReadInt64Async(CancellationToken cancellationToken)
         {
-            byte[] buffer = new byte[sizeof(long)];
-            await ReadExactlyAsync(buffer, cancellationToken).ConfigureAwait(false);
-            return BinaryPrimitives.ReadInt64LittleEndian(buffer);
+            await ReadExactlyAsync(_numericBuffer, sizeof(long), cancellationToken).ConfigureAwait(false);
+            return BinaryPrimitives.ReadInt64LittleEndian(_numericBuffer.AsSpan(0, sizeof(long)));
         }
 
         private ulong ReadUInt64()
@@ -364,9 +437,8 @@ namespace Krampus.BinJson.Binary
 
         private async Task<ulong> ReadUInt64Async(CancellationToken cancellationToken)
         {
-            byte[] buffer = new byte[sizeof(ulong)];
-            await ReadExactlyAsync(buffer, cancellationToken).ConfigureAwait(false);
-            return BinaryPrimitives.ReadUInt64LittleEndian(buffer);
+            await ReadExactlyAsync(_numericBuffer, sizeof(ulong), cancellationToken).ConfigureAwait(false);
+            return BinaryPrimitives.ReadUInt64LittleEndian(_numericBuffer.AsSpan(0, sizeof(ulong)));
         }
 
         private float ReadSingle()
@@ -378,9 +450,8 @@ namespace Krampus.BinJson.Binary
 
         private async Task<float> ReadSingleAsync(CancellationToken cancellationToken)
         {
-            byte[] buffer = new byte[sizeof(int)];
-            await ReadExactlyAsync(buffer, cancellationToken).ConfigureAwait(false);
-            return BitConverter.Int32BitsToSingle(BinaryPrimitives.ReadInt32LittleEndian(buffer));
+            await ReadExactlyAsync(_numericBuffer, sizeof(int), cancellationToken).ConfigureAwait(false);
+            return BitConverter.Int32BitsToSingle(BinaryPrimitives.ReadInt32LittleEndian(_numericBuffer.AsSpan(0, sizeof(int))));
         }
 
         private double ReadDouble()
@@ -392,16 +463,21 @@ namespace Krampus.BinJson.Binary
 
         private async Task<double> ReadDoubleAsync(CancellationToken cancellationToken)
         {
-            byte[] buffer = new byte[sizeof(long)];
-            await ReadExactlyAsync(buffer, cancellationToken).ConfigureAwait(false);
-            return BitConverter.Int64BitsToDouble(BinaryPrimitives.ReadInt64LittleEndian(buffer));
+            await ReadExactlyAsync(_numericBuffer, sizeof(long), cancellationToken).ConfigureAwait(false);
+            return BitConverter.Int64BitsToDouble(BinaryPrimitives.ReadInt64LittleEndian(_numericBuffer.AsSpan(0, sizeof(long))));
         }
 
         private int ReadNonNegativeLength(string name)
         {
             int value = ReadInt32();
             if (value < 0)
-                throw new BJsonBinaryFormatException($"{name} cannot be negative.");
+                throw CreateFormatException(
+                    $"{name} cannot be negative.",
+                    name,
+                    details: new System.Collections.Generic.Dictionary<string, object?>
+                    {
+                        ["length"] = value
+                    });
             return value;
         }
 
@@ -409,7 +485,13 @@ namespace Krampus.BinJson.Binary
         {
             int value = await ReadInt32Async(cancellationToken).ConfigureAwait(false);
             if (value < 0)
-                throw new BJsonBinaryFormatException($"{name} cannot be negative.");
+                throw CreateFormatException(
+                    $"{name} cannot be negative.",
+                    name,
+                    details: new System.Collections.Generic.Dictionary<string, object?>
+                    {
+                        ["length"] = value
+                    });
             return value;
         }
 
@@ -423,7 +505,7 @@ namespace Krampus.BinJson.Binary
         private async Task<byte[]> ReadBytesExactAsync(int length, CancellationToken cancellationToken)
         {
             var buffer = new byte[length];
-            await ReadExactlyAsync(buffer, cancellationToken).ConfigureAwait(false);
+            await ReadExactlyAsync(buffer, length, cancellationToken).ConfigureAwait(false);
             return buffer;
         }
 
@@ -434,21 +516,167 @@ namespace Krampus.BinJson.Binary
             {
                 int bytesRead = _stream.Read(buffer.Slice(totalRead));
                 if (bytesRead <= 0)
-                    throw new BJsonBinaryFormatException("Unexpected end of stream while reading BinJson data.");
+                    throw CreateFormatException(
+                        "Unexpected end of stream while reading BinJson data.",
+                        "ReadExactly",
+                        details: new System.Collections.Generic.Dictionary<string, object?>
+                        {
+                            ["expectedBytes"] = buffer.Length,
+                            ["actualBytes"] = totalRead
+                        });
                 totalRead += bytesRead;
+                _bytesRead += bytesRead;
             }
         }
 
-        private async Task ReadExactlyAsync(byte[] buffer, CancellationToken cancellationToken)
+        private async Task ReadExactlyAsync(byte[] buffer, int length, CancellationToken cancellationToken)
         {
             int totalRead = 0;
-            while (totalRead < buffer.Length)
+            while (totalRead < length)
             {
-                int bytesRead = await _stream.ReadAsync(buffer, totalRead, buffer.Length - totalRead, cancellationToken).ConfigureAwait(false);
+                int bytesRead = await _stream.ReadAsync(buffer, totalRead, length - totalRead, cancellationToken).ConfigureAwait(false);
                 if (bytesRead <= 0)
-                    throw new BJsonBinaryFormatException("Unexpected end of stream while reading BinJson data.");
+                    throw CreateFormatException(
+                        "Unexpected end of stream while reading BinJson data.",
+                        "ReadExactly",
+                        details: new System.Collections.Generic.Dictionary<string, object?>
+                        {
+                            ["expectedBytes"] = length,
+                            ["actualBytes"] = totalRead
+                        });
                 totalRead += bytesRead;
+                _bytesRead += bytesRead;
             }
+        }
+
+        private BJsonBinaryFormatException CreateFormatException(string message, string? section, Exception? innerException = null, System.Collections.Generic.IReadOnlyDictionary<string, object?>? details = null)
+        {
+            return new BJsonBinaryFormatException(
+                message,
+                byteOffset: _bytesRead,
+                section: section,
+                documentPath: CurrentPath,
+                errorCode: BJsonErrorCode.BinaryFormatError,
+                innerException: innerException,
+                details: details);
+        }
+
+        private string CurrentPath
+        {
+            get
+            {
+                if (_pathDepth == 0)
+                    return "$";
+
+                var builder = new StringBuilder("$");
+                for (int i = 0; i < _pathDepth; i++)
+                {
+                    var segment = _pathSegments[i];
+                    if (segment.IsIndex)
+                    {
+                        builder.Append('[');
+                        builder.Append(segment.Index);
+                        builder.Append(']');
+                    }
+                    else
+                    {
+                        AppendPropertySegment(builder, segment.PropertyName!);
+                    }
+                }
+
+                return builder.ToString();
+            }
+        }
+
+        private void PushIndexPathSegment(int index)
+        {
+            EnsurePathCapacity(_pathDepth + 1);
+            _pathSegments[_pathDepth++] = PathSegment.ForIndex(index);
+        }
+
+        private void PushPropertyPathSegment(string key)
+        {
+            EnsurePathCapacity(_pathDepth + 1);
+            _pathSegments[_pathDepth++] = PathSegment.ForProperty(key);
+        }
+
+        private void PopPathSegment()
+        {
+            if (_pathDepth <= 0)
+                return;
+
+            _pathDepth--;
+            _pathSegments[_pathDepth] = default;
+        }
+
+        private void EnsurePathCapacity(int requiredCapacity)
+        {
+            if (_pathSegments.Length >= requiredCapacity)
+                return;
+
+            int nextSize = _pathSegments.Length == 0 ? 8 : _pathSegments.Length * 2;
+            while (nextSize < requiredCapacity)
+                nextSize *= 2;
+
+            Array.Resize(ref _pathSegments, nextSize);
+        }
+
+        private static void AppendPropertySegment(StringBuilder builder, string key)
+        {
+            if (IsSimpleIdentifier(key))
+            {
+                builder.Append('.');
+                builder.Append(key);
+                return;
+            }
+
+            builder.Append("['");
+            for (int i = 0; i < key.Length; i++)
+            {
+                char c = key[i];
+                if (c == '\\' || c == '\'')
+                    builder.Append('\\');
+                builder.Append(c);
+            }
+            builder.Append("']");
+        }
+
+        private static bool IsSimpleIdentifier(string key)
+        {
+            if (string.IsNullOrEmpty(key))
+                return false;
+
+            if (!(char.IsLetter(key[0]) || key[0] == '_'))
+                return false;
+
+            for (int i = 1; i < key.Length; i++)
+            {
+                char c = key[i];
+                if (!(char.IsLetterOrDigit(c) || c == '_'))
+                    return false;
+            }
+
+            return true;
+        }
+
+        private readonly struct PathSegment
+        {
+            private PathSegment(bool isIndex, int index, string? propertyName)
+            {
+                IsIndex = isIndex;
+                Index = index;
+                PropertyName = propertyName;
+            }
+
+            public bool IsIndex { get; }
+
+            public int Index { get; }
+
+            public string? PropertyName { get; }
+
+            public static PathSegment ForIndex(int index) => new PathSegment(true, index, null);
+
+            public static PathSegment ForProperty(string propertyName) => new PathSegment(false, 0, propertyName);
         }
     }
 }

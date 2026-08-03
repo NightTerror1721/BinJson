@@ -1,5 +1,6 @@
 using System;
 using System.Diagnostics;
+using System.IO;
 using Krampus.BinJson;
 using Krampus.BinJson.Binary;
 using Krampus.BinJson.Text;
@@ -184,6 +185,63 @@ namespace Krampus.BinJson.Tests
             Assert.True(pretty.Length > compact.Length);
         }
 
+        [Fact]
+        public void Allocation_TextParse_NestedPayload_RemainsReasonable()
+        {
+            const string json = "{\"a\":[1,2,3,4,5],\"b\":{\"x\":true,\"y\":false,\"z\":\"hello\"},\"c\":[{\"k\":1},{\"k\":2}],\"d\":12345}";
+
+            long bytes = MeasureAllocatedBytes(() =>
+            {
+                var value = BJsonTextReader.Deserialize(json);
+                _ = value.ObjectValue.Count;
+            }, iterations: 200);
+
+            _output.WriteLine($"Text parse allocations: {bytes} bytes total for 200 iterations ({bytes / 200.0:F1} bytes/op)");
+
+            Assert.InRange(bytes / 200.0, 1, 12000);
+        }
+
+        [Fact]
+        public void Allocation_BinaryRoundTrip_SmallPayload_RemainsReasonable()
+        {
+            var payload = BJsonValue.Create(new BJsonObject
+            {
+                ["id"] = 42,
+                ["name"] = "runner",
+                ["flags"] = new BJsonArray { true, false, true },
+                ["meta"] = new BJsonObject { ["hp"] = 99, ["speed"] = 1.5 }
+            });
+
+            long bytes = MeasureAllocatedBytes(() =>
+            {
+                byte[] data = BJsonBinaryWriter.Serialize(payload);
+                var parsed = BJsonBinaryReader.Deserialize(data);
+                _ = parsed.ObjectValue.Count;
+            }, iterations: 200);
+
+            _output.WriteLine($"Binary roundtrip allocations: {bytes} bytes total for 200 iterations ({bytes / 200.0:F1} bytes/op)");
+
+            Assert.InRange(bytes / 200.0, 1, 14000);
+        }
+
+        [Fact]
+        public void Allocation_BinaryReadFromReadOnlyMemory_AvoidsExcessiveCopying()
+        {
+            var payload = CreateLargeTestObject(depth: 2, breadth: 6);
+            byte[] bytes = BJsonBinaryWriter.Serialize(payload);
+            var memory = new ReadOnlyMemory<byte>(bytes);
+
+            long allocations = MeasureAllocatedBytes(() =>
+            {
+                var value = BJsonBinaryReader.DeserializeAsync(memory).GetAwaiter().GetResult();
+                _ = value.Type;
+            }, iterations: 100);
+
+            _output.WriteLine($"Binary ReadOnlyMemory async read allocations: {allocations} bytes total for 100 iterations ({allocations / 100.0:F1} bytes/op)");
+
+            Assert.InRange(allocations / 100.0, 1, 160000);
+        }
+
         private BJsonValue CreateLargeTestObject(int depth, int breadth)
         {
             if (depth == 0)
@@ -202,6 +260,28 @@ namespace Krampus.BinJson.Tests
             obj.Add("active", BJsonValue.True);
 
             return BJsonValue.Create(obj);
+        }
+
+        private static long MeasureAllocatedBytes(Action action, int iterations)
+        {
+            // Warm-up to avoid one-time JIT and cache noise in the measurement loop.
+            for (int i = 0; i < 8; i++)
+            {
+                action();
+            }
+
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+
+            long start = GC.GetAllocatedBytesForCurrentThread();
+            for (int i = 0; i < iterations; i++)
+            {
+                action();
+            }
+            long end = GC.GetAllocatedBytesForCurrentThread();
+
+            return end - start;
         }
     }
 }

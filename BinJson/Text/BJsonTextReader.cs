@@ -36,7 +36,14 @@ namespace Krampus.BinJson.Text
             }
             catch (Exception ex) when (!(ex is BJsonException))
             {
-                throw new BJsonParseException("Failed to read and parse JSON text.", ex);
+                throw new BJsonParseException(
+                    "Failed to read and parse JSON text.",
+                    errorCode: BJsonErrorCode.TextReadParseError,
+                    innerException: ex,
+                    details: new System.Collections.Generic.Dictionary<string, object?>
+                    {
+                        ["operation"] = "Read"
+                    });
             }
         }
 
@@ -53,7 +60,14 @@ namespace Krampus.BinJson.Text
             }
             catch (Exception ex) when (!(ex is BJsonException))
             {
-                throw new BJsonParseException("Failed to read and parse JSON text.", ex);
+                throw new BJsonParseException(
+                    "Failed to read and parse JSON text.",
+                    errorCode: BJsonErrorCode.TextReadParseError,
+                    innerException: ex,
+                    details: new System.Collections.Generic.Dictionary<string, object?>
+                    {
+                        ["operation"] = "ReadAsync"
+                    });
             }
         }
 
