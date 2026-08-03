@@ -506,6 +506,16 @@ namespace Krampus.BinJson.Binary
             {
                 WriteByte((byte)(BJsonBinaryTypeRanges.FixStrMin + bytes.Length));
             }
+            else if (bytes.Length <= byte.MaxValue)
+            {
+                WriteTypeCode(BJsonValueTypeCode.String8);
+                WriteVarUInt((ulong)bytes.Length);
+            }
+            else if (bytes.Length <= ushort.MaxValue)
+            {
+                WriteTypeCode(BJsonValueTypeCode.String16);
+                WriteVarUInt((ulong)bytes.Length);
+            }
             else
             {
                 WriteTypeCode(BJsonValueTypeCode.String32);

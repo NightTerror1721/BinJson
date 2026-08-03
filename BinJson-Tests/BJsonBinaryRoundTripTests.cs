@@ -270,6 +270,57 @@ namespace Krampus.BinJson.Tests
         }
 
         [Fact]
+        public void Serialize_StringLength_32_UsesString8()
+        {
+            string text = new string('a', 32);
+            var value = BJsonValue.Create(text);
+
+            byte[] bytes = BJsonBinaryWriter.Serialize(value, new BJsonBinaryWriterOptions
+            {
+                EnableStringTable = false,
+                EnablePackedArrays = false,
+            });
+
+            Assert.Equal((byte)BJsonValueTypeCode.String8, bytes[0]);
+            var parsed = BJsonBinaryReader.Deserialize(bytes);
+            Assert.Equal(value, parsed);
+        }
+
+        [Fact]
+        public void Serialize_StringLength_256_UsesString16()
+        {
+            string text = new string('b', 256);
+            var value = BJsonValue.Create(text);
+
+            byte[] bytes = BJsonBinaryWriter.Serialize(value, new BJsonBinaryWriterOptions
+            {
+                EnableStringTable = false,
+                EnablePackedArrays = false,
+            });
+
+            Assert.Equal((byte)BJsonValueTypeCode.String16, bytes[0]);
+            var parsed = BJsonBinaryReader.Deserialize(bytes);
+            Assert.Equal(value, parsed);
+        }
+
+        [Fact]
+        public void Serialize_StringLength_65536_UsesString32()
+        {
+            string text = new string('c', 65536);
+            var value = BJsonValue.Create(text);
+
+            byte[] bytes = BJsonBinaryWriter.Serialize(value, new BJsonBinaryWriterOptions
+            {
+                EnableStringTable = false,
+                EnablePackedArrays = false,
+            });
+
+            Assert.Equal((byte)BJsonValueTypeCode.String32, bytes[0]);
+            var parsed = BJsonBinaryReader.Deserialize(bytes);
+            Assert.Equal(value, parsed);
+        }
+
+        [Fact]
         public void Serialize_RepeatedLongStrings_WithStringTableAndPackedArrays_UsesPackedStringRefs()
         {
             string repeated = new string('z', 64);

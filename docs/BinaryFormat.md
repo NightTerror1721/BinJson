@@ -88,7 +88,7 @@ Writers must produce the smallest encoding by byte size.
 ### Strings
 
 - `FixStr`: type byte carries length.
-- `String8/16/32`: current canonical writer uses `String32` + `VarUInt length` for non-fix lengths.
+- `String8/16/32`: current canonical writer selects one of these tags for non-fix lengths based on UTF-8 byte count.
 
 ### Arrays
 
