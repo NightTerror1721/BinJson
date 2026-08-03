@@ -91,7 +91,7 @@ namespace Krampus.BinJson.Tests
         [Fact]
         public void Deserialize_InvalidTypeCode_Throws()
         {
-            using var stream = new MemoryStream(new byte[] { 0x7F });
+            using var stream = new MemoryStream(new byte[] { 0x8F });
 
             var ex = Assert.Throws<Krampus.BinJson.Error.BJsonBinaryFormatException>(() => BJsonBinaryReader.Deserialize(stream));
             Assert.Contains("Invalid BJson type code", ex.Message);
@@ -100,7 +100,7 @@ namespace Krampus.BinJson.Tests
         [Fact]
         public void Deserialize_TruncatedPayload_Throws()
         {
-            using var stream = new MemoryStream(new byte[] { 0x0D, 0x05, 0x00, 0x00, 0x00, 0x41, 0x42 });
+            using var stream = new MemoryStream(new byte[] { 0x95, 0x41, 0x42 });
 
             var ex = Assert.Throws<Krampus.BinJson.Error.BJsonBinaryFormatException>(() => BJsonBinaryReader.Deserialize(stream));
             Assert.Contains("Unexpected end of stream", ex.Message);
@@ -111,10 +111,9 @@ namespace Krampus.BinJson.Tests
         {
             byte[] payload =
             {
-                0x0F,
-                0x02, 0x00, 0x00, 0x00,
-                0x02, 0x00, 0x00, 0x00, (byte)'i', (byte)'d', 0x05, 0x01,
-                0x02, 0x00, 0x00, 0x00, (byte)'i', (byte)'d', 0x05, 0x02
+                0xC2,
+                0x02, (byte)'i', (byte)'d', 0x01,
+                0x02, (byte)'i', (byte)'d', 0x02
             };
 
             using var stream = new MemoryStream(payload);
@@ -160,6 +159,264 @@ namespace Krampus.BinJson.Tests
             var text = "hello";
             var fromText = BJsonBinary.FromString(text, Encoding.UTF8);
             Assert.Equal(text, fromText.DecodeString(Encoding.UTF8));
+        }
+
+        [Fact]
+        public void Serialize_BoolArray_UsesPackedArray()
+        {
+            var value = BJsonValue.Create(new BJsonArray { true, false, true, true, false, false, true, false, true });
+
+            byte[] bytes = BJsonBinaryWriter.Serialize(value);
+
+            Assert.Equal((byte)BJsonValueTypeCode.PackedArray, bytes[0]);
+            var roundTrip = BJsonBinaryReader.Deserialize(bytes);
+            Assert.Equal(value, roundTrip);
+        }
+
+        [Fact]
+        public void Serialize_NullArray_UsesPackedArray()
+        {
+            var value = BJsonValue.Create(new BJsonArray { BJsonValue.Null, BJsonValue.Null, BJsonValue.Null, BJsonValue.Null, BJsonValue.Null });
+
+            byte[] bytes = BJsonBinaryWriter.Serialize(value);
+
+            Assert.Equal((byte)BJsonValueTypeCode.PackedArray, bytes[0]);
+            var roundTrip = BJsonBinaryReader.Deserialize(bytes);
+            Assert.Equal(value, roundTrip);
+        }
+
+        [Fact]
+        public void Serialize_BoolArray_DisablePackedArrays_WritesRegularArray()
+        {
+            var value = BJsonValue.Create(new BJsonArray { true, false, true, false, true });
+
+            byte[] bytes = BJsonBinaryWriter.Serialize(value, new BJsonBinaryWriterOptions { EnablePackedArrays = false, EnableStringTable = true });
+
+            Assert.Equal((byte)(BJsonBinaryTypeRanges.FixArrayMin + 5), bytes[0]);
+            var roundTrip = BJsonBinaryReader.Deserialize(bytes);
+            Assert.Equal(value, roundTrip);
+        }
+
+        [Fact]
+        public void Serialize_IntegerArray_UsesPackedArray()
+        {
+            var value = BJsonValue.Create(new BJsonArray { 300, 301, 302, 303, 304, 305 });
+
+            byte[] bytes = BJsonBinaryWriter.Serialize(value, new BJsonBinaryWriterOptions
+            {
+                EnableStringTable = false,
+                EnablePackedArrays = true,
+            });
+
+            Assert.Equal((byte)BJsonValueTypeCode.PackedArray, bytes[0]);
+            var parsed = BJsonBinaryReader.Deserialize(bytes);
+            Assert.Equal(value, parsed);
+        }
+
+        [Fact]
+        public void Serialize_FloatArray_UsesPackedArray()
+        {
+            var value = BJsonValue.Create(new BJsonArray { 1.5, 2.5, 3.5, 4.5, 5.5 });
+
+            byte[] bytes = BJsonBinaryWriter.Serialize(value, new BJsonBinaryWriterOptions
+            {
+                EnableStringTable = false,
+                EnablePackedArrays = true,
+            });
+
+            Assert.Equal((byte)BJsonValueTypeCode.PackedArray, bytes[0]);
+            var parsed = BJsonBinaryReader.Deserialize(bytes);
+            Assert.Equal(value, parsed);
+        }
+
+        [Fact]
+        public void Serialize_StringArray_UsesPackedArray()
+        {
+            string a = new string('a', 40);
+            string b = new string('b', 40);
+            string c = new string('c', 40);
+            var value = BJsonValue.Create(new BJsonArray { a, b, c, a });
+
+            byte[] bytes = BJsonBinaryWriter.Serialize(value, new BJsonBinaryWriterOptions
+            {
+                EnableStringTable = false,
+                EnablePackedArrays = true,
+            });
+
+            Assert.Equal((byte)BJsonValueTypeCode.PackedArray, bytes[0]);
+            var parsed = BJsonBinaryReader.Deserialize(bytes);
+            Assert.Equal(value, parsed);
+        }
+
+        [Fact]
+        public void Serialize_BinaryArray_UsesPackedArray()
+        {
+            var value = BJsonValue.Create(new BJsonArray
+            {
+                BJsonValue.Create(new BJsonBinary(new byte[] { 1,2,3,4,5,6,7,8,9,10 })),
+                BJsonValue.Create(new BJsonBinary(new byte[] { 11,12,13,14,15,16,17,18,19,20 })),
+                BJsonValue.Create(new BJsonBinary(new byte[] { 21,22,23,24,25,26,27,28,29,30 })),
+            });
+
+            byte[] bytes = BJsonBinaryWriter.Serialize(value, new BJsonBinaryWriterOptions
+            {
+                EnableStringTable = false,
+                EnablePackedArrays = true,
+            });
+
+            Assert.Equal((byte)BJsonValueTypeCode.PackedArray, bytes[0]);
+            var parsed = BJsonBinaryReader.Deserialize(bytes);
+            Assert.Equal(value, parsed);
+        }
+
+        [Fact]
+        public void Serialize_RepeatedLongStrings_WithStringTableAndPackedArrays_UsesPackedStringRefs()
+        {
+            string repeated = new string('z', 64);
+            var value = BJsonValue.Create(new BJsonArray { repeated, repeated, repeated, repeated, repeated, repeated });
+
+            byte[] bytes = BJsonBinaryWriter.Serialize(value, new BJsonBinaryWriterOptions
+            {
+                EnableStringTable = true,
+                EnablePackedArrays = true,
+            });
+
+            Assert.Contains((byte)BJsonValueTypeCode.PackedArray, bytes);
+            Assert.Contains((byte)BJsonValueTypeCode.StringRef, bytes);
+
+            var parsed = BJsonBinaryReader.Deserialize(bytes);
+            Assert.Equal(value, parsed);
+        }
+
+        [Fact]
+        public void RoundTrip_ObjectKeyLength_127_UsesSingleByteVarUInt()
+        {
+            string key = new string('k', 127);
+            var value = BJsonValue.Create(new BJsonObject { [key] = 1 });
+
+            byte[] bytes = BJsonBinaryWriter.Serialize(value, new BJsonBinaryWriterOptions { EnableStringTable = false, EnablePackedArrays = false });
+
+            Assert.Equal(0xC1, bytes[0]);
+            Assert.Equal(0x7F, bytes[1]);
+            var parsed = BJsonBinaryReader.Deserialize(bytes);
+            Assert.Equal(value, parsed);
+        }
+
+        [Fact]
+        public void RoundTrip_ObjectKeyLength_128_UsesTwoByteVarUInt()
+        {
+            string key = new string('k', 128);
+            var value = BJsonValue.Create(new BJsonObject { [key] = 1 });
+
+            byte[] bytes = BJsonBinaryWriter.Serialize(value, new BJsonBinaryWriterOptions { EnableStringTable = false, EnablePackedArrays = false });
+
+            Assert.Equal(0xC1, bytes[0]);
+            Assert.Equal(0x80, bytes[1]);
+            Assert.Equal(0x01, bytes[2]);
+            var parsed = BJsonBinaryReader.Deserialize(bytes);
+            Assert.Equal(value, parsed);
+        }
+
+        [Fact]
+        public void Deserialize_InvalidVarUIntEncoding_Throws()
+        {
+            byte[] payload =
+            {
+                (byte)BJsonValueTypeCode.String32,
+                0x80, 0x80, 0x80, 0x80, 0x80,
+                0x80, 0x80, 0x80, 0x80, 0x80,
+            };
+
+            using var stream = new MemoryStream(payload);
+            var ex = Assert.Throws<Krampus.BinJson.Error.BJsonBinaryFormatException>(() => BJsonBinaryReader.Deserialize(stream));
+            Assert.Contains("Invalid VarUInt encoding", ex.Message);
+        }
+
+        [Fact]
+        public void Deserialize_VarUIntCountExceedsInt32_Throws()
+        {
+            byte[] payload =
+            {
+                (byte)BJsonValueTypeCode.Binary,
+                0x80, 0x80, 0x80, 0x80, 0x08,
+            };
+
+            using var stream = new MemoryStream(payload);
+            var ex = Assert.Throws<Krampus.BinJson.Error.BJsonBinaryFormatException>(() => BJsonBinaryReader.Deserialize(stream));
+            Assert.Contains("exceeds Int32.MaxValue", ex.Message);
+        }
+
+        [Fact]
+        public void Deserialize_HeaderWithInvalidVersion_Throws()
+        {
+            byte[] payload =
+            {
+                (byte)BJsonValueTypeCode.HeaderMarker,
+                (byte)'B', (byte)'J',
+                0x02,
+                0x00,
+                (byte)BJsonValueTypeCode.Null,
+            };
+
+            using var stream = new MemoryStream(payload);
+            var ex = Assert.Throws<Krampus.BinJson.Error.BJsonBinaryFormatException>(() => BJsonBinaryReader.Deserialize(stream));
+            Assert.Contains("Unsupported binary version", ex.Message);
+        }
+
+        [Fact]
+        public void Deserialize_HeaderWithUnsupportedFlags_Throws()
+        {
+            byte[] payload =
+            {
+                (byte)BJsonValueTypeCode.HeaderMarker,
+                (byte)'B', (byte)'J',
+                0x01,
+                0x80,
+                (byte)BJsonValueTypeCode.Null,
+            };
+
+            using var stream = new MemoryStream(payload);
+            var ex = Assert.Throws<Krampus.BinJson.Error.BJsonBinaryFormatException>(() => BJsonBinaryReader.Deserialize(stream));
+            Assert.Contains("Unsupported header flags", ex.Message);
+        }
+
+        [Fact]
+        public void Serialize_RepeatedLongStrings_EmitsHeaderAndStringTable()
+        {
+            string repeated = new string('x', 64);
+            var value = BJsonValue.Create(new BJsonArray { repeated, repeated, repeated, repeated });
+
+            byte[] bytes = BJsonBinaryWriter.Serialize(value, new BJsonBinaryWriterOptions { EnableStringTable = true, EnablePackedArrays = false });
+
+            Assert.Equal((byte)BJsonValueTypeCode.HeaderMarker, bytes[0]);
+            bool hasStringTableTag = false;
+            for (int i = 0; i < bytes.Length; i++)
+            {
+                if (bytes[i] == (byte)BJsonValueTypeCode.StringTable)
+                {
+                    hasStringTableTag = true;
+                    break;
+                }
+            }
+
+            Assert.True(hasStringTableTag);
+            var parsed = BJsonBinaryReader.Deserialize(bytes);
+            Assert.Equal(value, parsed);
+        }
+
+        [Fact]
+        public void Deserialize_ExtContainerBlock_IsSkipped()
+        {
+            byte[] payload =
+            {
+                (byte)BJsonValueTypeCode.ExtContainer,
+                0x03,
+                0xAA, 0xBB, 0xCC,
+                (byte)BJsonValueTypeCode.Null,
+            };
+
+            var parsed = BJsonBinaryReader.Deserialize(payload);
+            Assert.True(parsed.IsNull);
         }
 
         private static void AssertRoundTrip(BJsonValue value)

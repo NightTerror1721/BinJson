@@ -1,4 +1,5 @@
 using Krampus.BinJson;
+using Krampus.BinJson.Binary;
 using Krampus.BinJson.Text;
 using System;
 using System.IO;
@@ -42,7 +43,7 @@ namespace Krampus.BinJson.Tests
         [Fact]
         public void TryDeserialize_ReturnsFalse_ForInvalidPayload()
         {
-            var ok = BJson.TryDeserialize(new byte[] { 0x7F }, out var value);
+            var ok = BJson.TryDeserialize(new byte[] { 0x8F }, out var value);
 
             Assert.False(ok);
             Assert.True(value.IsNull);
@@ -188,10 +189,67 @@ namespace Krampus.BinJson.Tests
         [Fact]
         public async Task TryDeserializeAsync_ReturnsFalse_ForInvalidPayload()
         {
-            var result = await BJson.TryDeserializeAsync(new byte[] { 0x7F });
+            var result = await BJson.TryDeserializeAsync(new byte[] { 0x8F });
 
             Assert.False(result.Success);
             Assert.True(result.Value.IsNull);
+        }
+
+        [Fact]
+        public void SerializeToBytes_WithWriterOptions_CanDisablePackedArrays()
+        {
+            var value = BJsonValue.Create(new BJsonArray { true, false, true, false, true });
+            var options = new BJsonBinaryWriterOptions { EnablePackedArrays = false, EnableStringTable = true };
+
+            byte[] bytes = BJson.SerializeToBytes(value, options);
+
+            Assert.Equal((byte)(BJsonBinaryTypeRanges.FixArrayMin + 5), bytes[0]);
+            var parsed = BJson.Deserialize(bytes);
+            Assert.Equal(value, parsed);
+        }
+
+        [Fact]
+        public void Deserialize_WithReaderOptions_CanCoerceInvalidStringRefToNull()
+        {
+            byte[] payload = { (byte)BJsonValueTypeCode.StringRef, 0x00 };
+
+            var strictOptions = new BJsonBinaryReaderOptions { InvalidStringRefPolicy = BJsonInvalidStringRefPolicy.Strict };
+            Assert.Throws<Krampus.BinJson.Error.BJsonBinaryFormatException>(() => BJson.Deserialize(payload, strictOptions));
+
+            var coerceOptions = new BJsonBinaryReaderOptions { InvalidStringRefPolicy = BJsonInvalidStringRefPolicy.CoerceNull };
+            var parsed = BJson.Deserialize(payload, coerceOptions);
+            Assert.True(parsed.IsNull);
+        }
+
+        [Fact]
+        public async Task DeserializeAsync_WithReaderOptions_CanCoerceInvalidStringRefToNull()
+        {
+            byte[] payload = { (byte)BJsonValueTypeCode.StringRef, 0x00 };
+            var coerceOptions = new BJsonBinaryReaderOptions { InvalidStringRefPolicy = BJsonInvalidStringRefPolicy.CoerceNull };
+
+            var parsed = await BJson.DeserializeAsync(new ReadOnlyMemory<byte>(payload), coerceOptions);
+
+            Assert.True(parsed.IsNull);
+        }
+
+        [Fact]
+        public async Task DeserializeAsync_HeaderAndExtContainer_AreHandled()
+        {
+            byte[] payload =
+            {
+                (byte)BJsonValueTypeCode.HeaderMarker,
+                (byte)'B', (byte)'J',
+                0x01,
+                0x00,
+                (byte)BJsonValueTypeCode.ExtContainer,
+                0x03,
+                0xAA, 0xBB, 0xCC,
+                (byte)BJsonValueTypeCode.Null,
+            };
+
+            var parsed = await BJson.DeserializeAsync(new ReadOnlyMemory<byte>(payload));
+
+            Assert.True(parsed.IsNull);
         }
 
         private sealed class TrackingStringWriter : StringWriter

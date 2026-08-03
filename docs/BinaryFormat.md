@@ -1,202 +1,215 @@
-# BinJson Binary Format Specification v1.0
+# BinJson Binary Format Specification v1.0 (Final)
 
 ## Overview
 
-BinJson is a compact binary encoding format for JSON-like data structures. It is designed for efficient serialization and deserialization with minimal overhead while maintaining compatibility with standard JSON semantics.
+This is the official and only BinJson binary format v1.0.
 
-## Design Goals
+- There is no legacy wire format compatibility.
+- The format is compact, type-aware, and optimized for low-overhead DOM round-trips.
 
-- **Compact**: Minimal size overhead
-- **Fast**: Efficient to parse and generate
-- **Type-preserving**: Maintains numeric type information (Int8, Int16, Int32, Int64, Float32, Float64, etc.)
-- **Self-describing**: Type information embedded in the format
-- **Platform-independent**: Fixed endianness and encoding
+The format targets the BinJson DOM types:
 
-## General Format
+- `BJsonValue`
+- `BJsonArray`
+- `BJsonObject`
+- `BJsonBinary`
+
+## Core Rules
 
 ### Endianness
-All multi-byte numeric values are encoded in **little-endian** byte order.
 
-### String Encoding
-All strings are encoded in **UTF-8** without BOM (Byte Order Mark).
+All fixed-width multibyte numeric payloads are little-endian.
 
-### Length Prefixes
-Variable-length data (strings, arrays, objects, binary) use **Int32** (4 bytes, little-endian) length prefixes.
+### Text Encoding
 
-### Type Codes
-Every value starts with a single-byte type code that identifies its type:
+All text is UTF-8 without BOM.
 
-| Type Code | Hex  | Type        | Description                          |
-|-----------|------|-------------|--------------------------------------|
-| `0x00`    | 0    | Null        | Represents JSON null                 |
-| `0x01`    | 1    | Int8        | Signed 8-bit integer (sbyte)         |
-| `0x02`    | 2    | Int16       | Signed 16-bit integer (short)        |
-| `0x03`    | 3    | Int32       | Signed 32-bit integer (int)          |
-| `0x04`    | 4    | Int64       | Signed 64-bit integer (long)         |
-| `0x05`    | 5    | UInt8       | Unsigned 8-bit integer (byte)        |
-| `0x06`    | 6    | UInt16      | Unsigned 16-bit integer (ushort)     |
-| `0x07`    | 7    | UInt32      | Unsigned 32-bit integer (uint)       |
-| `0x08`    | 8    | UInt64      | Unsigned 64-bit integer (ulong)      |
-| `0x09`    | 9    | Float32     | IEEE 754 single-precision float      |
-| `0x0A`    | 10   | Float64     | IEEE 754 double-precision float      |
-| `0x0B`    | 11   | BoolTrue    | Boolean true                         |
-| `0x0C`    | 12   | BoolFalse   | Boolean false                        |
-| `0x0D`    | 13   | String      | UTF-8 encoded string                 |
-| `0x0E`    | 14   | Array       | Ordered collection of values         |
-| `0x0F`    | 15   | Object      | Key-value dictionary (string keys)   |
-| `0x10`    | 16   | Binary      | Raw byte array                       |
+### Size and Count Encoding
 
-## Type Encoding Details
+All lengths and counts are encoded as `VarUInt` (LEB128 unsigned variable-length integer).
 
-### Null (0x00)
+- `VarUInt` is used only for lengths, counts, and indexes.
+- `VarUInt` is not a DOM value type.
+
+### Canonical Writing
+
+Writers must produce the smallest encoding by byte size.
+
+- Prefer fixed families when available (`FixInt`, `FixStr`, `FixArray`, `FixObject`).
+- For alternative encodings with equal size, choose the simpler fixed form.
+
+## Type Code Table
+
+### Fixed Ranges
+
+| Range | Name | Meaning |
+|---|---|---|
+| `0x00-0x7F` | Positive FixInt | Integer value embedded in the type byte (`0..127`) |
+| `0x90-0xAF` | FixStr | UTF-8 string, length in low 5 bits (`0..31`) |
+| `0xB0-0xBF` | FixArray | Array, element count in low 4 bits (`0..15`) |
+| `0xC0-0xCF` | FixObject | Object, pair count in low 4 bits (`0..15`) |
+
+### Single-Byte Tags
+
+| Hex | Name | Payload |
+|---|---|---|
+| `0x80` | Null | none |
+| `0x81` | BoolFalse | none |
+| `0x82` | BoolTrue | none |
+| `0x83` | Int8 | 1 byte |
+| `0x84` | Int16 | 2 bytes LE |
+| `0x85` | Int32 | 4 bytes LE |
+| `0x86` | Int64 | 8 bytes LE |
+| `0x87` | UInt8 | 1 byte |
+| `0x88` | UInt16 | 2 bytes LE |
+| `0x89` | UInt32 | 4 bytes LE |
+| `0x8A` | UInt64 | 8 bytes LE |
+| `0x8B` | Float32 | 4 bytes IEEE-754 LE |
+| `0x8C` | Float64 | 8 bytes IEEE-754 LE |
+| `0x8D` | VarInt | Reserved scalar tag (not used for DOM values) |
+| `0x8E` | VarUInt | Reserved scalar tag (not used for DOM values) |
+| `0x8F` | Reserved | invalid for current parser |
+| `0xD0` | String8 | `VarUInt length` + UTF-8 bytes |
+| `0xD1` | String16 | `VarUInt length` + UTF-8 bytes |
+| `0xD2` | String32 | `VarUInt length` + UTF-8 bytes |
+| `0xD3` | StringRef | `VarUInt index` into StringTable |
+| `0xD4` | ArrayVar | `VarUInt count` + `count` values |
+| `0xD5` | ObjectVar | `VarUInt pairCount` + pairs |
+| `0xD6` | PackedArray | `[ElemTypeCode][VarUInt count][payload]` |
+| `0xD7` | Binary | `VarUInt length` + raw bytes |
+| `0xD8-0xDF` | Reserved | invalid |
+| `0xE0` | HeaderMarker | `[Magic 'B''J'][Version][Flags]` |
+| `0xE1` | StringTable | `VarUInt count` + entries |
+| `0xE2` | ExtContainer | `VarUInt length` + extension payload |
+| `0xE3-0xFF` | Reserved | invalid |
+
+## Structures
+
+### Strings
+
+- `FixStr`: type byte carries length.
+- `String8/16/32`: current canonical writer uses `String32` + `VarUInt length` for non-fix lengths.
+
+### Arrays
+
+- `FixArray`: small arrays (`0..15`).
+- `ArrayVar`: large arrays (`VarUInt count`).
+
+### Objects
+
+- `FixObject`: small objects (`0..15`).
+- `ObjectVar`: large objects (`VarUInt pair count`).
+- Object keys are always encoded as: `VarUInt keyLength` + `UTF-8 key bytes`.
+
+### Binary
+
+- `Binary`: `VarUInt length` + raw bytes.
+
+## Optional Header
+
+`HeaderMarker` is optional and emitted only when needed (for example, when a `StringTable` block is present).
+
+Header layout:
+
+- `Magic`: ASCII `B`, `J`
+- `Version`: `0x01`
+- `Flags`:
+	- bit 0: StringTable present
+	- bit 1: ExtContainer present
+
+The header advertises optional blocks. Blocks are still emitted as explicit tags (`StringTable`, `ExtContainer`) in the stream.
+
+## StringTable and StringRef
+
+### StringTable
+
+`StringTable` defines interned strings in order:
+
+- `VarUInt count`
+- repeated `count` times: `VarUInt length` + UTF-8 bytes
+
+### StringRef
+
+`StringRef` payload is `VarUInt index`.
+
+Reader behavior for invalid indexes is configurable:
+
+- `Strict`: throw `BJsonBinaryFormatException`
+- `CoerceNull`: treat invalid reference as `null`
+
+### Emission Criterion
+
+The writer emits references only when they reduce total payload size.
+
+## PackedArray
+
+`PackedArray` layout:
+
+- `[PackedArrayTag][ElemTypeCode][VarUInt count][payload]`
+
+Supported element categories are non-composed types:
+
+- `null`, `bool`, integer scalars, float scalars, `string`, `binary`
+
+Current payload strategies:
+
+- `null`: count-only (no per-element bytes)
+- `bool`: bit-packed
+- scalar numeric: contiguous fixed-width values
+- `string`: var-length strings or string refs depending on plan
+- `binary`: per-element `VarUInt length` + raw bytes
+
+Packed encoding is used only when it is strictly smaller than regular array encoding.
+
+## Errors and Validation
+
+Deserialization must fail with `BJsonBinaryFormatException` for:
+
+- unknown/reserved type codes
+- malformed `VarUInt`
+- unsupported header versions/flags
+- duplicate object keys
+- truncated payloads
+
+## Operational Limits
+
+The current reference implementation enforces practical limits for decoded lengths/counts:
+
+- Any decoded `VarUInt` used as a length/count/index must fit in signed 32-bit range (`<= Int32.MaxValue`).
+- Values above `Int32.MaxValue` fail with a binary format error.
+- Malformed `VarUInt` sequences (more than 10 continuation bytes without termination) fail with a binary format error.
+
+### Defensive Recommendations
+
+For untrusted payloads, implementations should also apply configurable guards:
+
+- Maximum nesting depth for arrays/objects (recommended: 64-128)
+- Maximum total string bytes
+- Maximum total binary bytes
+- Maximum container element/pair counts
+
+These guards are additive hardening controls and do not change wire compatibility.
+
+## Example
+
+Object:
+
+```json
+{ "player": "Hero", "level": 10, "active": true }
 ```
-[TypeCode: 0x00]
-```
-Single byte, no additional data.
 
-### Integers (0x01-0x08)
-```
-[TypeCode] [Value: N bytes]
-```
-Where N is determined by the type:
-- Int8/UInt8: 1 byte
-- Int16/UInt16: 2 bytes (little-endian)
-- Int32/UInt32: 4 bytes (little-endian)
-- Int64/UInt64: 8 bytes (little-endian)
+Canonical binary bytes (hex):
 
-**Example**: Int32 value `42`
-```
-0x03 0x2A 0x00 0x00 0x00
+```text
+C3                         // FixObject, 3 pairs
+06 70 6C 61 79 65 72       // key "player" (VarUInt len=6 + bytes)
+94 48 65 72 6F             // FixStr "Hero"
+05 6C 65 76 65 6C          // key "level" (VarUInt len=5 + bytes)
+0A                         // Positive FixInt 10
+06 61 63 74 69 76 65       // key "active" (VarUInt len=6 + bytes)
+82                         // BoolTrue
 ```
 
-### Floats (0x09-0x0A)
-```
-[TypeCode] [Value: N bytes]
-```
-- Float32: 4 bytes (IEEE 754, little-endian)
-- Float64: 8 bytes (IEEE 754, little-endian)
+## Version Policy
 
-**Example**: Float64 value `3.14159`
-```
-0x0A [8 bytes of IEEE 754 double]
-```
-
-### Booleans (0x0B, 0x0C)
-```
-[TypeCode]
-```
-Single byte, no additional data.
-- `0x0B`: true
-- `0x0C`: false
-
-### String (0x0D)
-```
-[TypeCode: 0x0D] [Length: Int32] [UTF-8 Bytes]
-```
-- **Length**: Number of bytes in UTF-8 encoding (not character count)
-- **UTF-8 Bytes**: Raw UTF-8 encoded string data
-
-**Example**: String `"hello"`
-```
-0x0D 0x05 0x00 0x00 0x00 0x68 0x65 0x6C 0x6C 0x6F
-```
-
-### Array (0x0E)
-```
-[TypeCode: 0x0E] [Count: Int32] [Element1] [Element2] ... [ElementN]
-```
-- **Count**: Number of elements in the array
-- **Elements**: Each element is a complete BinJson value (with its own type code)
-
-**Example**: Array `[1, "test", null]`
-```
-0x0E                     // Array type code
-0x03 0x00 0x00 0x00      // Count: 3
-0x05 0x01                // Element 0: UInt8 value 1
-0x0D 0x04 0x00 0x00 0x00 0x74 0x65 0x73 0x74  // Element 1: String "test"
-0x00                     // Element 2: Null
-```
-
-### Object (0x0F)
-```
-[TypeCode: 0x0F] [Count: Int32] [Key1] [Value1] [Key2] [Value2] ... [KeyN] [ValueN]
-```
-- **Count**: Number of key-value pairs
-- **Keys**: Each key is encoded as a String (without type code prefix, just Length + UTF-8 bytes)
-- **Values**: Each value is a complete BinJson value (with its own type code)
-
-**Example**: Object `{"name": "Alice", "age": 30}`
-```
-0x0F                     // Object type code
-0x02 0x00 0x00 0x00      // Count: 2 pairs
-
-// Pair 1: "name" => "Alice"
-0x04 0x00 0x00 0x00      // Key length: 4
-0x6E 0x61 0x6D 0x65      // Key bytes: "name"
-0x0D 0x05 0x00 0x00 0x00 0x41 0x6C 0x69 0x63 0x65  // Value: String "Alice"
-
-// Pair 2: "age" => 30
-0x03 0x00 0x00 0x00      // Key length: 3
-0x61 0x67 0x65           // Key bytes: "age"
-0x05 0x1E                // Value: UInt8 30
-```
-
-### Binary (0x10)
-```
-[TypeCode: 0x10] [Length: Int32] [Raw Bytes]
-```
-- **Length**: Number of bytes in the binary data
-- **Raw Bytes**: Raw byte data
-
-**Example**: Binary `[0xFF, 0xAA, 0x55]`
-```
-0x10 0x03 0x00 0x00 0x00 0xFF 0xAA 0x55
-```
-
-## Size Limits
-
-- **String length**: Maximum 2,147,483,647 bytes (Int32.MaxValue)
-- **Array count**: Maximum 2,147,483,647 elements (Int32.MaxValue)
-- **Object count**: Maximum 2,147,483,647 pairs (Int32.MaxValue)
-- **Binary length**: Maximum 2,147,483,647 bytes (Int32.MaxValue)
-
-## Implementation Notes
-
-### Numeric Type Selection
-When serializing, the smallest appropriate type should be used:
-- Integers that fit in smaller types should use Int8/Int16/Int32 instead of always using Int64
-- However, exact type preservation is allowed if the source specified a particular numeric type
-
-### Object Key Ordering
-Object keys have no guaranteed ordering in the format. Implementations may serialize keys in any order.
-
-### Duplicate Keys
-Duplicate keys in objects are **not allowed**. Behavior for duplicate keys is undefined and may result in an error during deserialization.
-
-### Invalid Type Codes
-Any type code not defined in this specification should result in a deserialization error with a clear exception message.
-
-### Nesting Depth
-Implementations should protect against excessive nesting depth (e.g., deeply nested arrays/objects) to prevent stack overflow attacks. A reasonable limit is 64-128 levels of nesting.
-
-## Version History
-
-### v1.0 (Current)
-- Initial specification
-- Type codes 0x00-0x10 defined
-- Little-endian encoding
-- UTF-8 strings
-- Int32 length prefixes
-
-## Future Considerations
-
-Reserved type code ranges for future extensions:
-- `0x11-0x1F`: Reserved for extended primitive types
-- `0x20-0x7F`: Reserved for structured types
-- `0x80-0xFF`: Reserved for application-specific extensions
-
-Potential future additions:
-- Compressed strings
-- Reference encoding for shared objects
-- Schema versioning
-- Optional metadata headers
+`v1.0` is final for this repository branch and replaces previous drafts.

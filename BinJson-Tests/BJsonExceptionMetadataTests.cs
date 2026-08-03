@@ -43,7 +43,7 @@ namespace Krampus.BinJson.Tests
         [Fact]
         public void BinaryFormatException_ExposesByteOffsetAndSection()
         {
-            using var stream = new MemoryStream(new byte[] { 0x0D, 0x05, 0x00, 0x00, 0x00, 0x41, 0x42 });
+            using var stream = new MemoryStream(new byte[] { 0x95, 0x41, 0x42 });
 
             var ex = Assert.Throws<BJsonBinaryFormatException>(() => BJsonBinaryReader.Deserialize(stream));
 
@@ -83,7 +83,7 @@ namespace Krampus.BinJson.Tests
         [Fact]
         public void BinaryFormatException_ContractSnapshot_IsStable()
         {
-            using var stream = new MemoryStream(new byte[] { 0x0F, 0x01, 0x00, 0x00, 0x00, 0x01 });
+            using var stream = new MemoryStream(new byte[] { 0xD5, 0x01, 0x01 });
 
             var ex = Assert.Throws<BJsonBinaryFormatException>(() => BJsonBinaryReader.Deserialize(stream));
 

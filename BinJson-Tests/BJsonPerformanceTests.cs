@@ -233,7 +233,7 @@ namespace Krampus.BinJson.Tests
 
             long allocations = MeasureAllocatedBytes(() =>
             {
-                var value = BJsonBinaryReader.DeserializeAsync(memory).GetAwaiter().GetResult();
+                var value = BJsonBinaryReaderAsync.DeserializeAsync(memory).GetAwaiter().GetResult();
                 _ = value.Type;
             }, iterations: 100);
 

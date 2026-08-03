@@ -57,6 +57,15 @@ The current official code enum is `BJsonErrorCode`.
 - `BinaryFormatError`
 - `BinarySerializationError`
 
+Binary format v1.0 uses `BinaryFormatError` for issues such as:
+
+- Invalid or reserved type code
+- Malformed `VarUInt`
+- Truncated payload
+- Invalid `HeaderMarker` magic/version/flags
+- Duplicate object keys
+- Invalid `StringRef` index (when reader policy is strict)
+
 ### Generic Code
 
 - `Unknown`
@@ -97,3 +106,6 @@ catch (BJsonException ex)
 - `ErrorCodeValue` is the recommended contract for code-level handling.
 - `DocumentPath` is best effort and may be `null` when context is unavailable.
 - `Details` keys are additive and may grow over time.
+- Binary reader behavior for invalid `StringRef` indexes is configurable:
+    - strict mode throws `BJsonBinaryFormatException`
+    - coerce-null mode returns `null` for invalid references

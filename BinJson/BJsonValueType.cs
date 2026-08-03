@@ -18,23 +18,54 @@ namespace Krampus.BinJson
 
     public enum BJsonValueTypeCode : byte
     {
-        Null        = 0x00,
-        Int8        = 0x01,
-        Int16       = 0x02,
-        Int32       = 0x03,
-        Int64       = 0x04,
-        UInt8       = 0x05,
-        UInt16      = 0x06,
-        UInt32      = 0x07,
-        UInt64      = 0x08,
-        Float32     = 0x09,
-        Float64     = 0x0A,
-        BoolTrue    = 0x0B,
-        BoolFalse   = 0x0C,
-        String      = 0x0D,
-        Array       = 0x0E,
-        Object      = 0x0F,
-        Binary      = 0x10,
+        Null            = 0x80,
+        BoolFalse       = 0x81,
+        BoolTrue        = 0x82,
+        Int8            = 0x83,
+        Int16           = 0x84,
+        Int32           = 0x85,
+        Int64           = 0x86,
+        UInt8           = 0x87,
+        UInt16          = 0x88,
+        UInt32          = 0x89,
+        UInt64          = 0x8A,
+        Float32         = 0x8B,
+        Float64         = 0x8C,
+        VarInt          = 0x8D,
+        VarUInt         = 0x8E,
+        String8         = 0xD0,
+        String16        = 0xD1,
+        String32        = 0xD2,
+        StringRef       = 0xD3,
+        ArrayVar        = 0xD4,
+        ObjectVar       = 0xD5,
+        PackedArray     = 0xD6,
+        Binary          = 0xD7,
+        HeaderMarker    = 0xE0,
+        StringTable     = 0xE1,
+        ExtContainer    = 0xE2,
+    }
+
+    public static class BJsonBinaryTypeRanges
+    {
+        public const byte PositiveFixIntMax = 0x7F;
+
+        public const byte FixStrMin = 0x90;
+        public const byte FixStrMax = 0xAF;
+
+        public const byte FixArrayMin = 0xB0;
+        public const byte FixArrayMax = 0xBF;
+
+        public const byte FixObjectMin = 0xC0;
+        public const byte FixObjectMax = 0xCF;
+
+        public static bool IsPositiveFixInt(byte code) => code <= PositiveFixIntMax;
+
+        public static bool IsFixStr(byte code) => code >= FixStrMin && code <= FixStrMax;
+
+        public static bool IsFixArray(byte code) => code >= FixArrayMin && code <= FixArrayMax;
+
+        public static bool IsFixObject(byte code) => code >= FixObjectMin && code <= FixObjectMax;
     }
 
     public static class BJsonValueTypeExtensions
@@ -54,9 +85,13 @@ namespace Krampus.BinJson
             BJsonValueTypeCode.Float64 => BJsonValueType.Float,
             BJsonValueTypeCode.BoolTrue or
             BJsonValueTypeCode.BoolFalse => BJsonValueType.Boolean,
-            BJsonValueTypeCode.String => BJsonValueType.String,
-            BJsonValueTypeCode.Array => BJsonValueType.Array,
-            BJsonValueTypeCode.Object => BJsonValueType.Object,
+            BJsonValueTypeCode.String8 or
+            BJsonValueTypeCode.String16 or
+            BJsonValueTypeCode.String32 or
+            BJsonValueTypeCode.StringRef => BJsonValueType.String,
+            BJsonValueTypeCode.ArrayVar or
+            BJsonValueTypeCode.PackedArray => BJsonValueType.Array,
+            BJsonValueTypeCode.ObjectVar => BJsonValueType.Object,
             BJsonValueTypeCode.Binary => BJsonValueType.Binary,
             _ => throw new BJsonValidationException($"Invalid BJsonValueTypeCode: {code}"),
         };

@@ -13,6 +13,17 @@ You can combine:
 - Reference preservation with `$id` and `$ref`
 - Optional source generators for attributed models
 
+## I/O Extension Architecture Rule
+
+When extending text or binary I/O behavior (readers/writers), follow the internal architecture described in [Architecture.md](Architecture.md):
+
+- Keep sync wrappers and async wrappers separate.
+- Do not call sync wrappers from async wrappers (or vice versa).
+- Move shared protocol logic to common `*Core` classes.
+- Keep lifecycle/ownership concerns (`leaveOpen`, option wiring, validation) in `*Base` classes.
+
+This rule avoids hidden coupling and reduces regression risk when changing wire format logic.
+
 ## Basic Object Serialization
 
 Use the `BJson` facade to serialize CLR objects into `BJsonValue` and deserialize them back:

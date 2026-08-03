@@ -3,36 +3,28 @@
 using System;
 using System.IO;
 using System.Text;
-using System.Threading;
-using System.Threading.Tasks;
 using Krampus.BinJson.Error;
 
 namespace Krampus.BinJson.Text
 {
-    public sealed class BJsonTextReader : IDisposable
+    public sealed class BJsonTextReader : BJsonTextReaderBase
     {
-        private readonly TextReader _reader;
-        private readonly bool _leaveOpen;
-        private readonly BJsonTextReaderOptions _options;
-
         public BJsonTextReader(TextReader reader, bool leaveOpen = false)
             : this(reader, BJsonTextReaderOptions.Default, leaveOpen)
         {
         }
 
         public BJsonTextReader(TextReader reader, BJsonTextReaderOptions? options, bool leaveOpen = false)
+            : base(reader, options, leaveOpen)
         {
-            _reader = reader ?? throw new BJsonValidationException("Parameter 'reader' cannot be null.");
-            _options = options ?? BJsonTextReaderOptions.Default;
-            _leaveOpen = leaveOpen;
         }
 
         public BJsonValue Read()
         {
             try
             {
-                string json = _reader.ReadToEnd();
-                return JsonTextParser.Parse(json, _options);
+                string json = Reader.ReadToEnd();
+                return JsonTextParser.Parse(json, Options);
             }
             catch (Exception ex) when (!(ex is BJsonException))
             {
@@ -45,36 +37,6 @@ namespace Krampus.BinJson.Text
                         ["operation"] = "Read"
                     });
             }
-        }
-
-        public async Task<BJsonValue> ReadAsync(CancellationToken cancellationToken = default)
-        {
-            if (cancellationToken.IsCancellationRequested)
-                return await Task.FromCanceled<BJsonValue>(cancellationToken).ConfigureAwait(false);
-
-            try
-            {
-                string json = await _reader.ReadToEndAsync().ConfigureAwait(false);
-                cancellationToken.ThrowIfCancellationRequested();
-                return JsonTextParser.Parse(json, _options);
-            }
-            catch (Exception ex) when (!(ex is BJsonException))
-            {
-                throw new BJsonParseException(
-                    "Failed to read and parse JSON text.",
-                    errorCode: BJsonErrorCode.TextReadParseError,
-                    innerException: ex,
-                    details: new System.Collections.Generic.Dictionary<string, object?>
-                    {
-                        ["operation"] = "ReadAsync"
-                    });
-            }
-        }
-
-        public void Dispose()
-        {
-            if (!_leaveOpen)
-                _reader.Dispose();
         }
 
         public static BJsonValue Deserialize(string json, BJsonTextReaderOptions? options = null)
@@ -91,12 +53,6 @@ namespace Krampus.BinJson.Text
             return jsonReader.Read();
         }
 
-        public static async Task<BJsonValue> DeserializeAsync(TextReader reader, BJsonTextReaderOptions? options = null, bool leaveOpen = false, CancellationToken cancellationToken = default)
-        {
-            using var jsonReader = new BJsonTextReader(reader, options, leaveOpen);
-            return await jsonReader.ReadAsync(cancellationToken).ConfigureAwait(false);
-        }
-
         public static BJsonValue Deserialize(Stream stream, BJsonTextReaderOptions? options = null, bool leaveOpen = false)
         {
             if (stream is null)
@@ -106,13 +62,5 @@ namespace Krampus.BinJson.Text
             return Deserialize(reader, options, leaveOpen: false);
         }
 
-        public static async Task<BJsonValue> DeserializeAsync(Stream stream, BJsonTextReaderOptions? options = null, bool leaveOpen = false, CancellationToken cancellationToken = default)
-        {
-            if (stream is null)
-                throw new BJsonValidationException("Parameter 'stream' cannot be null.");
-
-            using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true, bufferSize: 1024, leaveOpen: leaveOpen);
-            return await DeserializeAsync(reader, options, leaveOpen: false, cancellationToken).ConfigureAwait(false);
-        }
     }
 }

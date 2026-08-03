@@ -4,11 +4,12 @@ BinJson is a .NET library for representing JSON-like data using a lightweight DO
 
 ## Project Status
 
-Current status: functional for the DOM, binary serialization v1, and JSON text serialization **with no external dependencies**. Compatible with Unity 2021.2+.
+Current status: functional for the DOM, binary serialization v1.0 (final, no legacy wire compatibility), and JSON text serialization **with no external dependencies**. Compatible with Unity 2021.2+.
 
 It currently includes:
 - A DOM for null, booleans, integers, floats, strings, arrays, objects, and binary values.
 - Binary serialization in `Krampus.BinJson.Binary`.
+- Official binary wire format v1.0 with fix types, VarUInt lengths/counts, optional header blocks, StringTable/StringRef, and PackedArray support.
 - JSON text serialization in `Krampus.BinJson.Text` with a **manual parser** (no `System.Text.Json`).
 - Extensible object serialization in `Krampus.BinJson.Serialization`.
 - Pretty-print and advanced configuration options.
@@ -29,6 +30,26 @@ It currently includes:
 - **No external dependencies**: suitable for Unity and restricted environments.
 - **Configurable pretty-printing** for readable JSON output.
 - **Binary value validation**: binary values are forbidden by default in JSON text output.
+
+## Sync and Async Architecture
+
+BinJson uses an explicit split between synchronous and asynchronous APIs for text and binary I/O.
+
+- Sync public types: `BJsonBinaryReader`, `BJsonBinaryWriter`, `BJsonTextReader`, `BJsonTextWriter`
+- Async public types: `BJsonBinaryReaderAsync`, `BJsonBinaryWriterAsync`, `BJsonTextReaderAsync`, `BJsonTextWriterAsync`
+
+To avoid behavior drift and duplicated protocol rules, shared logic is extracted into common layers:
+
+- `*Base` classes: lifecycle concerns and common constructor validation
+- `*Core` classes: shared format logic used by both sync and async wrappers
+
+Design rules:
+
+- Sync and async reader/writer classes do not call each other.
+- Shared behavior belongs in `*Core` (or `*Base` when applicable).
+- The `BJson` facade can expose both sync and async flows, but implementation remains split internally.
+
+See [docs/Architecture.md](docs/Architecture.md) for details and contribution rules.
 
 ## Unity Compatibility
 
@@ -261,17 +282,23 @@ For a complete guide, see [docs/Extensibility.md](docs/Extensibility.md).
 ## Main API
 
 - `BJson.Serialize(BJsonValue, Stream)`
+- `BJson.Serialize(BJsonValue, Stream, BJsonBinaryWriterOptions, bool)`
 - `BJson.Serialize<T>(T?, BJsonSerializerOptions?)`
 - `BJson.Serialize(object?, Type, BJsonSerializerOptions?)`
 - `BJson.Deserialize(Stream)`
+- `BJson.Deserialize(Stream, BJsonBinaryReaderOptions, bool)`
 - `BJson.Deserialize<T>(BJsonValue, BJsonSerializerOptions?)`
 - `BJson.Deserialize(BJsonValue, Type, BJsonSerializerOptions?)`
 - `BJson.SerializeToBytes(BJsonValue)`
+- `BJson.SerializeToBytes(BJsonValue, BJsonBinaryWriterOptions)`
 - `BJson.SerializeToBytes<T>(T?, BJsonSerializerOptions?)`
 - `BJson.SerializeToBytesAsync(BJsonValue, CancellationToken)`
+- `BJson.SerializeToBytesAsync(BJsonValue, BJsonBinaryWriterOptions, CancellationToken)`
 - `BJson.SerializeToBytesAsync<T>(T?, BJsonSerializerOptions?, CancellationToken)`
 - `BJson.Deserialize(ReadOnlySpan<byte>)`
+- `BJson.Deserialize(ReadOnlySpan<byte>, BJsonBinaryReaderOptions)`
 - `BJson.DeserializeAsync(ReadOnlyMemory<byte>, CancellationToken)`
+- `BJson.DeserializeAsync(ReadOnlyMemory<byte>, BJsonBinaryReaderOptions, CancellationToken)`
 - `BJson.TryDeserialize(ReadOnlySpan<byte>, out BJsonValue)`
 - `BJson.TryDeserializeAsync(ReadOnlyMemory<byte>, CancellationToken)`
 - `BJson.SerializeToFile(string, BJsonValue)`
@@ -302,9 +329,13 @@ For a complete guide, see [docs/Extensibility.md](docs/Extensibility.md).
 - `BJson.StringifyToFileAsync(string, BJsonValue, BJsonTextWriterOptions?, Encoding?, CancellationToken)`
 - `BJson.Transform(BJsonValue, Func<BJsonValue, BJsonValue>, int)`
 - `BJsonTextWriter.Serialize(BJsonValue, BJsonTextWriterOptions?)`
-- `BJsonTextWriter.SerializeAsync(TextWriter, BJsonValue, BJsonTextWriterOptions?, bool, CancellationToken)`
+- `BJsonTextWriterAsync.SerializeAsync(TextWriter, BJsonValue, BJsonTextWriterOptions?, bool, CancellationToken)`
 - `BJsonTextReader.Deserialize(string, BJsonTextReaderOptions?)`
-- `BJsonTextReader.DeserializeAsync(TextReader|Stream, BJsonTextReaderOptions?, bool, CancellationToken)`
+- `BJsonTextReaderAsync.DeserializeAsync(TextReader|Stream, BJsonTextReaderOptions?, bool, CancellationToken)`
+- `BJsonBinaryWriterAsync.SerializeAsync(Stream, BJsonValue, bool, CancellationToken, BJsonBinaryWriterOptions?)`
+- `BJsonBinaryWriterAsync.SerializeAsync(BJsonValue, CancellationToken, BJsonBinaryWriterOptions?)`
+- `BJsonBinaryReaderAsync.DeserializeAsync(Stream, bool, CancellationToken, BJsonBinaryReaderOptions?)`
+- `BJsonBinaryReaderAsync.DeserializeAsync(ReadOnlyMemory<byte>, CancellationToken, BJsonBinaryReaderOptions?)`
 
 ## DOM Utility API
 
@@ -395,3 +426,4 @@ The project includes basic performance tests (`BJsonPerformanceTests`) that veri
 - Extensibility guide: `docs/Extensibility.md`
 - Error handling and error code catalog: `docs/ErrorHandling.md`
 - **Attribute system reference & tutorial: `docs/Attributes.md`**
+- Sync/async implementation architecture: `docs/Architecture.md`

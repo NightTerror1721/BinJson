@@ -19,9 +19,25 @@ namespace Krampus.BinJson
             BJsonBinaryWriter.Serialize(stream, value, leaveOpen);
         }
 
+        public static void Serialize(BJsonValue value, Stream stream, BJsonBinaryWriterOptions options, bool leaveOpen = false)
+        {
+            if (options is null)
+                throw new BJsonValidationException("Parameter 'options' cannot be null.");
+
+            BJsonBinaryWriter.Serialize(stream, value, leaveOpen, options);
+        }
+
         public static Task SerializeAsync(BJsonValue value, Stream stream, bool leaveOpen = false, CancellationToken cancellationToken = default)
         {
-            return BJsonBinaryWriter.SerializeAsync(stream, value, leaveOpen, cancellationToken);
+            return BJsonBinaryWriterAsync.SerializeAsync(stream, value, leaveOpen, cancellationToken);
+        }
+
+        public static Task SerializeAsync(BJsonValue value, Stream stream, BJsonBinaryWriterOptions options, bool leaveOpen = false, CancellationToken cancellationToken = default)
+        {
+            if (options is null)
+                throw new BJsonValidationException("Parameter 'options' cannot be null.");
+
+            return BJsonBinaryWriterAsync.SerializeAsync(stream, value, leaveOpen, cancellationToken, options);
         }
 
         public static BJsonValue Serialize<T>(T? value, BJsonSerializerOptions? options = null)
@@ -39,9 +55,25 @@ namespace Krampus.BinJson
             return BJsonBinaryReader.Deserialize(stream, leaveOpen);
         }
 
+        public static BJsonValue Deserialize(Stream stream, BJsonBinaryReaderOptions options, bool leaveOpen = false)
+        {
+            if (options is null)
+                throw new BJsonValidationException("Parameter 'options' cannot be null.");
+
+            return BJsonBinaryReader.Deserialize(stream, leaveOpen, options);
+        }
+
         public static Task<BJsonValue> DeserializeAsync(Stream stream, bool leaveOpen = false, CancellationToken cancellationToken = default)
         {
-            return BJsonBinaryReader.DeserializeAsync(stream, leaveOpen, cancellationToken);
+            return BJsonBinaryReaderAsync.DeserializeAsync(stream, leaveOpen, cancellationToken);
+        }
+
+        public static Task<BJsonValue> DeserializeAsync(Stream stream, BJsonBinaryReaderOptions options, bool leaveOpen = false, CancellationToken cancellationToken = default)
+        {
+            if (options is null)
+                throw new BJsonValidationException("Parameter 'options' cannot be null.");
+
+            return BJsonBinaryReaderAsync.DeserializeAsync(stream, leaveOpen, cancellationToken, options);
         }
 
         public static T? Deserialize<T>(BJsonValue value, BJsonSerializerOptions? options = null)
@@ -59,9 +91,25 @@ namespace Krampus.BinJson
             return BJsonBinaryWriter.Serialize(value);
         }
 
+        public static byte[] SerializeToBytes(BJsonValue value, BJsonBinaryWriterOptions options)
+        {
+            if (options is null)
+                throw new BJsonValidationException("Parameter 'options' cannot be null.");
+
+            return BJsonBinaryWriter.Serialize(value, options);
+        }
+
         public static Task<byte[]> SerializeToBytesAsync(BJsonValue value, CancellationToken cancellationToken = default)
         {
-            return BJsonBinaryWriter.SerializeAsync(value, cancellationToken);
+            return BJsonBinaryWriterAsync.SerializeAsync(value, cancellationToken);
+        }
+
+        public static Task<byte[]> SerializeToBytesAsync(BJsonValue value, BJsonBinaryWriterOptions options, CancellationToken cancellationToken = default)
+        {
+            if (options is null)
+                throw new BJsonValidationException("Parameter 'options' cannot be null.");
+
+            return BJsonBinaryWriterAsync.SerializeAsync(value, cancellationToken, options);
         }
 
         public static byte[] SerializeToBytes<T>(T? value, BJsonSerializerOptions? options = null)
@@ -79,9 +127,25 @@ namespace Krampus.BinJson
             return BJsonBinaryReader.Deserialize(data);
         }
 
+        public static BJsonValue Deserialize(ReadOnlySpan<byte> data, BJsonBinaryReaderOptions options)
+        {
+            if (options is null)
+                throw new BJsonValidationException("Parameter 'options' cannot be null.");
+
+            return BJsonBinaryReader.Deserialize(data, options);
+        }
+
         public static Task<BJsonValue> DeserializeAsync(ReadOnlyMemory<byte> data, CancellationToken cancellationToken = default)
         {
-            return BJsonBinaryReader.DeserializeAsync(data, cancellationToken);
+            return BJsonBinaryReaderAsync.DeserializeAsync(data, cancellationToken);
+        }
+
+        public static Task<BJsonValue> DeserializeAsync(ReadOnlyMemory<byte> data, BJsonBinaryReaderOptions options, CancellationToken cancellationToken = default)
+        {
+            if (options is null)
+                throw new BJsonValidationException("Parameter 'options' cannot be null.");
+
+            return BJsonBinaryReaderAsync.DeserializeAsync(data, cancellationToken, options);
         }
 
         public static bool TryDeserialize(ReadOnlySpan<byte> data, out BJsonValue value)
@@ -102,7 +166,7 @@ namespace Krampus.BinJson
         {
             try
             {
-                var value = await BJsonBinaryReader.DeserializeAsync(data, cancellationToken).ConfigureAwait(false);
+                var value = await BJsonBinaryReaderAsync.DeserializeAsync(data, cancellationToken).ConfigureAwait(false);
                 return (true, value);
             }
             catch
@@ -118,7 +182,7 @@ namespace Krampus.BinJson
 
         public static async Task<T?> DeserializeAsync<T>(ReadOnlyMemory<byte> data, BJsonSerializerOptions? options = null, CancellationToken cancellationToken = default)
         {
-            var value = await BJsonBinaryReader.DeserializeAsync(data, cancellationToken).ConfigureAwait(false);
+            var value = await BJsonBinaryReaderAsync.DeserializeAsync(data, cancellationToken).ConfigureAwait(false);
             return Deserialize<T>(value, options);
         }
 
@@ -230,7 +294,7 @@ namespace Krampus.BinJson
 
         public static Task<BJsonValue> ParseAsync(TextReader reader, bool leaveOpen = false, CancellationToken cancellationToken = default)
         {
-            return BJsonTextReader.DeserializeAsync(reader, options: null, leaveOpen, cancellationToken);
+            return BJsonTextReaderAsync.DeserializeAsync(reader, options: null, leaveOpen, cancellationToken);
         }
 
         public static BJsonValue Parse(TextReader reader, BJsonTextReaderOptions? options, bool leaveOpen = false)
@@ -240,7 +304,7 @@ namespace Krampus.BinJson
 
         public static Task<BJsonValue> ParseAsync(TextReader reader, BJsonTextReaderOptions? options, bool leaveOpen = false, CancellationToken cancellationToken = default)
         {
-            return BJsonTextReader.DeserializeAsync(reader, options, leaveOpen, cancellationToken);
+            return BJsonTextReaderAsync.DeserializeAsync(reader, options, leaveOpen, cancellationToken);
         }
 
         public static BJsonValue ParseJson(Stream stream, bool leaveOpen = false)
@@ -250,7 +314,7 @@ namespace Krampus.BinJson
 
         public static Task<BJsonValue> ParseJsonAsync(Stream stream, bool leaveOpen = false, CancellationToken cancellationToken = default)
         {
-            return BJsonTextReader.DeserializeAsync(stream, options: null, leaveOpen, cancellationToken);
+            return BJsonTextReaderAsync.DeserializeAsync(stream, options: null, leaveOpen, cancellationToken);
         }
 
         public static BJsonValue ParseJson(Stream stream, BJsonTextReaderOptions? options, bool leaveOpen = false)
@@ -260,7 +324,7 @@ namespace Krampus.BinJson
 
         public static Task<BJsonValue> ParseJsonAsync(Stream stream, BJsonTextReaderOptions? options, bool leaveOpen = false, CancellationToken cancellationToken = default)
         {
-            return BJsonTextReader.DeserializeAsync(stream, options, leaveOpen, cancellationToken);
+            return BJsonTextReaderAsync.DeserializeAsync(stream, options, leaveOpen, cancellationToken);
         }
 
         public static BJsonValue ParseFile(string filePath, BJsonTextReaderOptions? options = null, Encoding? encoding = null)
@@ -334,12 +398,12 @@ namespace Krampus.BinJson
 
         public static Task StringifyAsync(TextWriter writer, BJsonValue value, bool leaveOpen = false, CancellationToken cancellationToken = default)
         {
-            return BJsonTextWriter.SerializeAsync(writer, value, options: null, leaveOpen, cancellationToken);
+            return BJsonTextWriterAsync.SerializeAsync(writer, value, options: null, leaveOpen, cancellationToken);
         }
 
         public static Task StringifyAsync(TextWriter writer, BJsonValue value, BJsonTextWriterOptions? options, bool leaveOpen = false, CancellationToken cancellationToken = default)
         {
-            return BJsonTextWriter.SerializeAsync(writer, value, options, leaveOpen, cancellationToken);
+            return BJsonTextWriterAsync.SerializeAsync(writer, value, options, leaveOpen, cancellationToken);
         }
 
         public static void StringifyToFile(string filePath, BJsonValue value, BJsonTextWriterOptions? options = null, Encoding? encoding = null)
@@ -355,7 +419,7 @@ namespace Krampus.BinJson
             ValidateFilePath(filePath);
             using var stream = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.None, bufferSize: 4096, useAsync: true);
             using var writer = new StreamWriter(stream, encoding ?? Encoding.UTF8, bufferSize: 1024, leaveOpen: false);
-            await BJsonTextWriter.SerializeAsync(writer, value, options, leaveOpen: false, cancellationToken).ConfigureAwait(false);
+            await BJsonTextWriterAsync.SerializeAsync(writer, value, options, leaveOpen: false, cancellationToken).ConfigureAwait(false);
         }
 
         public static BJsonValue Transform(BJsonValue value, Func<BJsonValue, BJsonValue> transformer, int maxDepth = 256)
