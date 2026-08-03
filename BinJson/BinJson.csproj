@@ -11,6 +11,8 @@
     <PackageTags>json;binary;serialization;dom;unity</PackageTags>
     <RepositoryUrl>https://github.com/NightTerror1721/BinJson</RepositoryUrl>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <DebugType>portable</DebugType>
+    <DebugSymbols>true</DebugSymbols>
   </PropertyGroup>
 
   <ItemGroup>
