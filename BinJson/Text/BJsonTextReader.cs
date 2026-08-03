@@ -3,6 +3,8 @@
 using System;
 using System.IO;
 using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
 using Krampus.BinJson.Error;
 
 namespace Krampus.BinJson.Text
@@ -38,6 +40,23 @@ namespace Krampus.BinJson.Text
             }
         }
 
+        public async Task<BJsonValue> ReadAsync(CancellationToken cancellationToken = default)
+        {
+            if (cancellationToken.IsCancellationRequested)
+                return await Task.FromCanceled<BJsonValue>(cancellationToken).ConfigureAwait(false);
+
+            try
+            {
+                string json = await _reader.ReadToEndAsync().ConfigureAwait(false);
+                cancellationToken.ThrowIfCancellationRequested();
+                return JsonTextParser.Parse(json, _options);
+            }
+            catch (Exception ex) when (!(ex is BJsonException))
+            {
+                throw new BJsonParseException("Failed to read and parse JSON text.", ex);
+            }
+        }
+
         public void Dispose()
         {
             if (!_leaveOpen)
@@ -58,6 +77,12 @@ namespace Krampus.BinJson.Text
             return jsonReader.Read();
         }
 
+        public static async Task<BJsonValue> DeserializeAsync(TextReader reader, BJsonTextReaderOptions? options = null, bool leaveOpen = false, CancellationToken cancellationToken = default)
+        {
+            using var jsonReader = new BJsonTextReader(reader, options, leaveOpen);
+            return await jsonReader.ReadAsync(cancellationToken).ConfigureAwait(false);
+        }
+
         public static BJsonValue Deserialize(Stream stream, BJsonTextReaderOptions? options = null, bool leaveOpen = false)
         {
             if (stream is null)
@@ -65,6 +90,15 @@ namespace Krampus.BinJson.Text
 
             using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true, bufferSize: 1024, leaveOpen: leaveOpen);
             return Deserialize(reader, options, leaveOpen: false);
+        }
+
+        public static async Task<BJsonValue> DeserializeAsync(Stream stream, BJsonTextReaderOptions? options = null, bool leaveOpen = false, CancellationToken cancellationToken = default)
+        {
+            if (stream is null)
+                throw new BJsonValidationException("Parameter 'stream' cannot be null.");
+
+            using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true, bufferSize: 1024, leaveOpen: leaveOpen);
+            return await DeserializeAsync(reader, options, leaveOpen: false, cancellationToken).ConfigureAwait(false);
         }
     }
 }

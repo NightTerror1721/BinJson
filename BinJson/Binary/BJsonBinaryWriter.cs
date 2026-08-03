@@ -4,6 +4,8 @@ using System;
 using System.Buffers.Binary;
 using System.IO;
 using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
 using Krampus.BinJson.Error;
 
 namespace Krampus.BinJson.Binary
@@ -38,11 +40,35 @@ namespace Krampus.BinJson.Binary
             }
         }
 
+        public async Task WriteAsync(BJsonValue value, CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                await WriteValueAsync(value, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not BJsonException)
+            {
+                throw new BJsonSerializationException("Failed to serialize BinJson value to binary format.", ex);
+            }
+        }
+
         public void Flush()
         {
             try
             {
                 _stream.Flush();
+            }
+            catch (Exception ex) when (ex is not BJsonException)
+            {
+                throw new BJsonSerializationException("Failed to flush binary BinJson writer.", ex);
+            }
+        }
+
+        public async Task FlushAsync(CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                await _stream.FlushAsync(cancellationToken).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is not BJsonException)
             {
@@ -63,12 +89,28 @@ namespace Krampus.BinJson.Binary
             writer.Flush();
         }
 
+        public static async Task SerializeAsync(Stream stream, BJsonValue value, bool leaveOpen = false, CancellationToken cancellationToken = default)
+        {
+            using var writer = new BJsonBinaryWriter(stream, leaveOpen);
+            await writer.WriteAsync(value, cancellationToken).ConfigureAwait(false);
+            await writer.FlushAsync(cancellationToken).ConfigureAwait(false);
+        }
+
         public static byte[] Serialize(BJsonValue value)
         {
             using var stream = new MemoryStream();
             using var writer = new BJsonBinaryWriter(stream, leaveOpen: true);
             writer.Write(value);
             writer.Flush();
+            return stream.ToArray();
+        }
+
+        public static async Task<byte[]> SerializeAsync(BJsonValue value, CancellationToken cancellationToken = default)
+        {
+            using var stream = new MemoryStream();
+            using var writer = new BJsonBinaryWriter(stream, leaveOpen: true);
+            await writer.WriteAsync(value, cancellationToken).ConfigureAwait(false);
+            await writer.FlushAsync(cancellationToken).ConfigureAwait(false);
             return stream.ToArray();
         }
 
@@ -99,6 +141,39 @@ namespace Krampus.BinJson.Binary
                     return;
                 case BJsonValueType.Binary:
                     WriteBinary(value.BinaryValue);
+                    return;
+                default:
+                    throw new BJsonSerializationException($"Unsupported BJsonValueType: {value.Type}");
+            }
+        }
+
+        private async Task WriteValueAsync(BJsonValue value, CancellationToken cancellationToken)
+        {
+            switch (value.Type)
+            {
+                case BJsonValueType.Null:
+                    await WriteTypeCodeAsync(BJsonValueTypeCode.Null, cancellationToken).ConfigureAwait(false);
+                    return;
+                case BJsonValueType.Integer:
+                    await WriteIntegerAsync(value, cancellationToken).ConfigureAwait(false);
+                    return;
+                case BJsonValueType.Float:
+                    await WriteFloatAsync(value, cancellationToken).ConfigureAwait(false);
+                    return;
+                case BJsonValueType.Boolean:
+                    await WriteTypeCodeAsync(value.BoolValue ? BJsonValueTypeCode.BoolTrue : BJsonValueTypeCode.BoolFalse, cancellationToken).ConfigureAwait(false);
+                    return;
+                case BJsonValueType.String:
+                    await WriteStringAsync(value.StringValue, cancellationToken).ConfigureAwait(false);
+                    return;
+                case BJsonValueType.Array:
+                    await WriteArrayAsync(value.ArrayValue, cancellationToken).ConfigureAwait(false);
+                    return;
+                case BJsonValueType.Object:
+                    await WriteObjectAsync(value.ObjectValue, cancellationToken).ConfigureAwait(false);
+                    return;
+                case BJsonValueType.Binary:
+                    await WriteBinaryAsync(value.BinaryValue, cancellationToken).ConfigureAwait(false);
                     return;
                 default:
                     throw new BJsonSerializationException($"Unsupported BJsonValueType: {value.Type}");
@@ -159,6 +234,60 @@ namespace Krampus.BinJson.Binary
             WriteUInt64(rawValue);
         }
 
+        private async Task WriteIntegerAsync(BJsonValue value, CancellationToken cancellationToken)
+        {
+            ulong rawValue = value.ULongValue;
+            long signedValue = unchecked((long)rawValue);
+
+            if (signedValue < 0)
+            {
+                if (signedValue >= sbyte.MinValue && signedValue <= sbyte.MaxValue)
+                {
+                    await WriteTypeCodeAsync(BJsonValueTypeCode.Int8, cancellationToken).ConfigureAwait(false);
+                    await WriteByteAsync(unchecked((byte)(sbyte)signedValue), cancellationToken).ConfigureAwait(false);
+                    return;
+                }
+                if (signedValue >= short.MinValue && signedValue <= short.MaxValue)
+                {
+                    await WriteTypeCodeAsync(BJsonValueTypeCode.Int16, cancellationToken).ConfigureAwait(false);
+                    await WriteInt16Async((short)signedValue, cancellationToken).ConfigureAwait(false);
+                    return;
+                }
+                if (signedValue >= int.MinValue && signedValue <= int.MaxValue)
+                {
+                    await WriteTypeCodeAsync(BJsonValueTypeCode.Int32, cancellationToken).ConfigureAwait(false);
+                    await WriteInt32Async((int)signedValue, cancellationToken).ConfigureAwait(false);
+                    return;
+                }
+
+                await WriteTypeCodeAsync(BJsonValueTypeCode.Int64, cancellationToken).ConfigureAwait(false);
+                await WriteInt64Async(signedValue, cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
+            if (rawValue <= byte.MaxValue)
+            {
+                await WriteTypeCodeAsync(BJsonValueTypeCode.UInt8, cancellationToken).ConfigureAwait(false);
+                await WriteByteAsync((byte)rawValue, cancellationToken).ConfigureAwait(false);
+                return;
+            }
+            if (rawValue <= ushort.MaxValue)
+            {
+                await WriteTypeCodeAsync(BJsonValueTypeCode.UInt16, cancellationToken).ConfigureAwait(false);
+                await WriteUInt16Async((ushort)rawValue, cancellationToken).ConfigureAwait(false);
+                return;
+            }
+            if (rawValue <= uint.MaxValue)
+            {
+                await WriteTypeCodeAsync(BJsonValueTypeCode.UInt32, cancellationToken).ConfigureAwait(false);
+                await WriteUInt32Async((uint)rawValue, cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
+            await WriteTypeCodeAsync(BJsonValueTypeCode.UInt64, cancellationToken).ConfigureAwait(false);
+            await WriteUInt64Async(rawValue, cancellationToken).ConfigureAwait(false);
+        }
+
         private void WriteFloat(BJsonValue value)
         {
             double doubleValue = value.DoubleValue;
@@ -175,6 +304,22 @@ namespace Krampus.BinJson.Binary
             WriteDouble(doubleValue);
         }
 
+        private async Task WriteFloatAsync(BJsonValue value, CancellationToken cancellationToken)
+        {
+            double doubleValue = value.DoubleValue;
+            float singleValue = (float)doubleValue;
+
+            if (CanRoundTripAsSingle(doubleValue, singleValue))
+            {
+                await WriteTypeCodeAsync(BJsonValueTypeCode.Float32, cancellationToken).ConfigureAwait(false);
+                await WriteSingleAsync(singleValue, cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
+            await WriteTypeCodeAsync(BJsonValueTypeCode.Float64, cancellationToken).ConfigureAwait(false);
+            await WriteDoubleAsync(doubleValue, cancellationToken).ConfigureAwait(false);
+        }
+
         private void WriteArray(BJsonArray array)
         {
             WriteTypeCode(BJsonValueTypeCode.Array);
@@ -183,6 +328,17 @@ namespace Krampus.BinJson.Binary
             for (int i = 0; i < array.Count; i++)
             {
                 WriteValue(array[i]);
+            }
+        }
+
+        private async Task WriteArrayAsync(BJsonArray array, CancellationToken cancellationToken)
+        {
+            await WriteTypeCodeAsync(BJsonValueTypeCode.Array, cancellationToken).ConfigureAwait(false);
+            await WriteInt32Async(array.Count, cancellationToken).ConfigureAwait(false);
+
+            for (int i = 0; i < array.Count; i++)
+            {
+                await WriteValueAsync(array[i], cancellationToken).ConfigureAwait(false);
             }
         }
 
@@ -198,10 +354,28 @@ namespace Krampus.BinJson.Binary
             }
         }
 
+        private async Task WriteObjectAsync(BJsonObject obj, CancellationToken cancellationToken)
+        {
+            await WriteTypeCodeAsync(BJsonValueTypeCode.Object, cancellationToken).ConfigureAwait(false);
+            await WriteInt32Async(obj.Count, cancellationToken).ConfigureAwait(false);
+
+            foreach (var pair in obj)
+            {
+                await WriteStringDataAsync(pair.Key, cancellationToken).ConfigureAwait(false);
+                await WriteValueAsync(pair.Value, cancellationToken).ConfigureAwait(false);
+            }
+        }
+
         private void WriteString(string value)
         {
             WriteTypeCode(BJsonValueTypeCode.String);
             WriteStringData(value);
+        }
+
+        private async Task WriteStringAsync(string value, CancellationToken cancellationToken)
+        {
+            await WriteTypeCodeAsync(BJsonValueTypeCode.String, cancellationToken).ConfigureAwait(false);
+            await WriteStringDataAsync(value, cancellationToken).ConfigureAwait(false);
         }
 
         private void WriteBinary(BJsonBinary value)
@@ -211,6 +385,13 @@ namespace Krampus.BinJson.Binary
             _stream.Write(value.AsSpan());
         }
 
+        private async Task WriteBinaryAsync(BJsonBinary value, CancellationToken cancellationToken)
+        {
+            await WriteTypeCodeAsync(BJsonValueTypeCode.Binary, cancellationToken).ConfigureAwait(false);
+            await WriteInt32Async(value.Count, cancellationToken).ConfigureAwait(false);
+            await _stream.WriteAsync(value.AsSpan().ToArray(), 0, value.Count, cancellationToken).ConfigureAwait(false);
+        }
+
         private void WriteStringData(string value)
         {
             byte[] bytes = Utf8.GetBytes(value);
@@ -218,14 +399,30 @@ namespace Krampus.BinJson.Binary
             _stream.Write(bytes, 0, bytes.Length);
         }
 
+        private async Task WriteStringDataAsync(string value, CancellationToken cancellationToken)
+        {
+            byte[] bytes = Utf8.GetBytes(value);
+            await WriteInt32Async(bytes.Length, cancellationToken).ConfigureAwait(false);
+            await _stream.WriteAsync(bytes, 0, bytes.Length, cancellationToken).ConfigureAwait(false);
+        }
+
         private void WriteTypeCode(BJsonValueTypeCode code)
         {
             _stream.WriteByte((byte)code);
         }
 
+        private Task WriteTypeCodeAsync(BJsonValueTypeCode code, CancellationToken cancellationToken)
+            => WriteByteAsync((byte)code, cancellationToken);
+
         private void WriteByte(byte value)
         {
             _stream.WriteByte(value);
+        }
+
+        private async Task WriteByteAsync(byte value, CancellationToken cancellationToken)
+        {
+            byte[] buffer = { value };
+            await _stream.WriteAsync(buffer, 0, 1, cancellationToken).ConfigureAwait(false);
         }
 
         private void WriteInt16(short value)
@@ -235,11 +432,25 @@ namespace Krampus.BinJson.Binary
             _stream.Write(buffer);
         }
 
+        private async Task WriteInt16Async(short value, CancellationToken cancellationToken)
+        {
+            byte[] buffer = new byte[sizeof(short)];
+            BinaryPrimitives.WriteInt16LittleEndian(buffer, value);
+            await _stream.WriteAsync(buffer, 0, buffer.Length, cancellationToken).ConfigureAwait(false);
+        }
+
         private void WriteUInt16(ushort value)
         {
             Span<byte> buffer = stackalloc byte[sizeof(ushort)];
             BinaryPrimitives.WriteUInt16LittleEndian(buffer, value);
             _stream.Write(buffer);
+        }
+
+        private async Task WriteUInt16Async(ushort value, CancellationToken cancellationToken)
+        {
+            byte[] buffer = new byte[sizeof(ushort)];
+            BinaryPrimitives.WriteUInt16LittleEndian(buffer, value);
+            await _stream.WriteAsync(buffer, 0, buffer.Length, cancellationToken).ConfigureAwait(false);
         }
 
         private void WriteInt32(int value)
@@ -249,11 +460,25 @@ namespace Krampus.BinJson.Binary
             _stream.Write(buffer);
         }
 
+        private async Task WriteInt32Async(int value, CancellationToken cancellationToken)
+        {
+            byte[] buffer = new byte[sizeof(int)];
+            BinaryPrimitives.WriteInt32LittleEndian(buffer, value);
+            await _stream.WriteAsync(buffer, 0, buffer.Length, cancellationToken).ConfigureAwait(false);
+        }
+
         private void WriteUInt32(uint value)
         {
             Span<byte> buffer = stackalloc byte[sizeof(uint)];
             BinaryPrimitives.WriteUInt32LittleEndian(buffer, value);
             _stream.Write(buffer);
+        }
+
+        private async Task WriteUInt32Async(uint value, CancellationToken cancellationToken)
+        {
+            byte[] buffer = new byte[sizeof(uint)];
+            BinaryPrimitives.WriteUInt32LittleEndian(buffer, value);
+            await _stream.WriteAsync(buffer, 0, buffer.Length, cancellationToken).ConfigureAwait(false);
         }
 
         private void WriteInt64(long value)
@@ -263,11 +488,25 @@ namespace Krampus.BinJson.Binary
             _stream.Write(buffer);
         }
 
+        private async Task WriteInt64Async(long value, CancellationToken cancellationToken)
+        {
+            byte[] buffer = new byte[sizeof(long)];
+            BinaryPrimitives.WriteInt64LittleEndian(buffer, value);
+            await _stream.WriteAsync(buffer, 0, buffer.Length, cancellationToken).ConfigureAwait(false);
+        }
+
         private void WriteUInt64(ulong value)
         {
             Span<byte> buffer = stackalloc byte[sizeof(ulong)];
             BinaryPrimitives.WriteUInt64LittleEndian(buffer, value);
             _stream.Write(buffer);
+        }
+
+        private async Task WriteUInt64Async(ulong value, CancellationToken cancellationToken)
+        {
+            byte[] buffer = new byte[sizeof(ulong)];
+            BinaryPrimitives.WriteUInt64LittleEndian(buffer, value);
+            await _stream.WriteAsync(buffer, 0, buffer.Length, cancellationToken).ConfigureAwait(false);
         }
 
         private void WriteSingle(float value)
@@ -277,11 +516,25 @@ namespace Krampus.BinJson.Binary
             _stream.Write(buffer);
         }
 
+        private async Task WriteSingleAsync(float value, CancellationToken cancellationToken)
+        {
+            byte[] buffer = new byte[sizeof(int)];
+            BinaryPrimitives.WriteInt32LittleEndian(buffer, BitConverter.SingleToInt32Bits(value));
+            await _stream.WriteAsync(buffer, 0, buffer.Length, cancellationToken).ConfigureAwait(false);
+        }
+
         private void WriteDouble(double value)
         {
             Span<byte> buffer = stackalloc byte[sizeof(long)];
             BinaryPrimitives.WriteInt64LittleEndian(buffer, BitConverter.DoubleToInt64Bits(value));
             _stream.Write(buffer);
+        }
+
+        private async Task WriteDoubleAsync(double value, CancellationToken cancellationToken)
+        {
+            byte[] buffer = new byte[sizeof(long)];
+            BinaryPrimitives.WriteInt64LittleEndian(buffer, BitConverter.DoubleToInt64Bits(value));
+            await _stream.WriteAsync(buffer, 0, buffer.Length, cancellationToken).ConfigureAwait(false);
         }
 
         private static bool CanRoundTripAsSingle(double doubleValue, float singleValue)

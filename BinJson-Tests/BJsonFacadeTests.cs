@@ -1,5 +1,9 @@
 using Krampus.BinJson;
 using Krampus.BinJson.Text;
+using System;
+using System.IO;
+using System.Text;
+using System.Threading.Tasks;
 using Xunit;
 
 namespace Krampus.BinJson.Tests
@@ -63,6 +67,142 @@ namespace Krampus.BinJson.Tests
             Assert.Equal(11, transformed.ObjectValue["a"].IntValue);
             Assert.Equal(12, transformed.ObjectValue["nested"].ArrayValue[0].IntValue);
             Assert.Equal(13, transformed.ObjectValue["nested"].ArrayValue[1].IntValue);
+        }
+
+        [Fact]
+        public void SyncBinaryFileApis_RoundTrip()
+        {
+            string filePath = Path.GetTempFileName();
+            try
+            {
+                var original = BJsonValue.Create(new BJsonObject
+                {
+                    ["id"] = 7,
+                    ["name"] = "hero"
+                });
+
+                BJson.SerializeToFile(filePath, original);
+                var parsed = BJson.DeserializeFromFile(filePath);
+
+                Assert.Equal(original, parsed);
+            }
+            finally
+            {
+                File.Delete(filePath);
+            }
+        }
+
+        [Fact]
+        public void SyncTextFileApis_RoundTrip()
+        {
+            string filePath = Path.GetTempFileName();
+            try
+            {
+                var original = BJsonValue.Create(new BJsonObject
+                {
+                    ["enabled"] = true,
+                    ["level"] = 3
+                });
+
+                BJson.StringifyToFile(filePath, original);
+                var parsed = BJson.ParseFile(filePath);
+
+                Assert.Equal(original, parsed);
+            }
+            finally
+            {
+                File.Delete(filePath);
+            }
+        }
+
+        [Fact]
+        public async Task AsyncBinaryFileApis_RoundTrip()
+        {
+            string filePath = Path.GetTempFileName();
+            try
+            {
+                var original = BJsonValue.Create(new BJsonArray { 1, 2, 3, "x" });
+
+                await BJson.SerializeToFileAsync(filePath, original);
+                var parsed = await BJson.DeserializeFromFileAsync(filePath);
+
+                Assert.Equal(original, parsed);
+            }
+            finally
+            {
+                File.Delete(filePath);
+            }
+        }
+
+        [Fact]
+        public async Task AsyncTextFileApis_RoundTrip()
+        {
+            string filePath = Path.GetTempFileName();
+            try
+            {
+                var original = BJsonValue.Create(new BJsonObject
+                {
+                    ["name"] = "alice",
+                    ["score"] = 9.5
+                });
+
+                await BJson.StringifyToFileAsync(filePath, original);
+                var parsed = await BJson.ParseFileAsync(filePath);
+
+                Assert.Equal(original, parsed);
+            }
+            finally
+            {
+                File.Delete(filePath);
+            }
+        }
+
+        [Fact]
+        public async Task BinaryStreamAsync_LeaveOpen_Respected()
+        {
+            var value = BJsonValue.Create(123);
+
+            using var openStream = new MemoryStream();
+            await BJson.SerializeAsync(value, openStream, leaveOpen: true);
+            Assert.True(openStream.CanRead);
+
+            var closedStream = new MemoryStream();
+            await BJson.SerializeAsync(value, closedStream, leaveOpen: false);
+            Assert.False(closedStream.CanRead);
+        }
+
+        [Fact]
+        public async Task TextWriterAsync_LeaveOpen_Respected()
+        {
+            var value = BJsonValue.Create(new BJsonObject { ["x"] = 1 });
+
+            var openWriter = new TrackingStringWriter();
+            await BJson.StringifyAsync(openWriter, value, leaveOpen: true);
+            Assert.False(openWriter.IsDisposed);
+
+            var closedWriter = new TrackingStringWriter();
+            await BJson.StringifyAsync(closedWriter, value, leaveOpen: false);
+            Assert.True(closedWriter.IsDisposed);
+        }
+
+        [Fact]
+        public async Task TryDeserializeAsync_ReturnsFalse_ForInvalidPayload()
+        {
+            var result = await BJson.TryDeserializeAsync(new byte[] { 0x7F });
+
+            Assert.False(result.Success);
+            Assert.True(result.Value.IsNull);
+        }
+
+        private sealed class TrackingStringWriter : StringWriter
+        {
+            public bool IsDisposed { get; private set; }
+
+            protected override void Dispose(bool disposing)
+            {
+                IsDisposed = true;
+                base.Dispose(disposing);
+            }
         }
     }
 }

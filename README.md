@@ -268,17 +268,43 @@ For a complete guide, see [docs/Extensibility.md](docs/Extensibility.md).
 - `BJson.Deserialize(BJsonValue, Type, BJsonSerializerOptions?)`
 - `BJson.SerializeToBytes(BJsonValue)`
 - `BJson.SerializeToBytes<T>(T?, BJsonSerializerOptions?)`
+- `BJson.SerializeToBytesAsync(BJsonValue, CancellationToken)`
+- `BJson.SerializeToBytesAsync<T>(T?, BJsonSerializerOptions?, CancellationToken)`
 - `BJson.Deserialize(ReadOnlySpan<byte>)`
+- `BJson.DeserializeAsync(ReadOnlyMemory<byte>, CancellationToken)`
 - `BJson.TryDeserialize(ReadOnlySpan<byte>, out BJsonValue)`
+- `BJson.TryDeserializeAsync(ReadOnlyMemory<byte>, CancellationToken)`
+- `BJson.SerializeToFile(string, BJsonValue)`
+- `BJson.SerializeToFile(string, object?, Type, BJsonSerializerOptions?)`
+- `BJson.SerializeToFileAsync(string, BJsonValue, CancellationToken)`
+- `BJson.SerializeToFileAsync(string, object?, Type, BJsonSerializerOptions?, CancellationToken)`
+- `BJson.DeserializeFromFile(string)`
+- `BJson.DeserializeFromFile<T>(string, BJsonSerializerOptions?)`
+- `BJson.DeserializeFromFile(string, Type, BJsonSerializerOptions?)`
+- `BJson.DeserializeFromFileAsync(string, CancellationToken)`
+- `BJson.DeserializeFromFileAsync<T>(string, BJsonSerializerOptions?, CancellationToken)`
+- `BJson.DeserializeFromFileAsync(string, Type, BJsonSerializerOptions?, CancellationToken)`
 - `BJson.Parse(string)`
 - `BJson.TryParse(string, out BJsonValue)`
 - `BJson.TryParse(string, BJsonTextReaderOptions?, out BJsonValue)`
+- `BJson.ParseAsync(TextReader, ...)` and `BJson.ParseJsonAsync(Stream, ...)`
+- `BJson.ParseFile(string, BJsonTextReaderOptions?, Encoding?)`
+- `BJson.ParseFile<T>(string, BJsonSerializerOptions?, BJsonTextReaderOptions?, Encoding?)`
+- `BJson.ParseFileAsync(string, BJsonTextReaderOptions?, Encoding?, CancellationToken)`
+- `BJson.ParseFileAsync<T>(string, BJsonSerializerOptions?, BJsonTextReaderOptions?, Encoding?, CancellationToken)`
 - `BJson.Parse<T>(string, BJsonSerializerOptions?, BJsonTextReaderOptions?)`
 - `BJson.Stringify(BJsonValue)`
 - `BJson.Stringify<T>(T?, BJsonSerializerOptions?, BJsonTextWriterOptions?)`
+- `BJson.StringifyAsync(BJsonValue, BJsonTextWriterOptions?, CancellationToken)`
+- `BJson.StringifyAsync<T>(T?, BJsonSerializerOptions?, BJsonTextWriterOptions?, CancellationToken)`
+- `BJson.Stringify(TextWriter, BJsonValue, bool)` and `BJson.StringifyAsync(TextWriter, BJsonValue, ..., CancellationToken)`
+- `BJson.StringifyToFile(string, BJsonValue, BJsonTextWriterOptions?, Encoding?)`
+- `BJson.StringifyToFileAsync(string, BJsonValue, BJsonTextWriterOptions?, Encoding?, CancellationToken)`
 - `BJson.Transform(BJsonValue, Func<BJsonValue, BJsonValue>, int)`
 - `BJsonTextWriter.Serialize(BJsonValue, BJsonTextWriterOptions?)`
+- `BJsonTextWriter.SerializeAsync(TextWriter, BJsonValue, BJsonTextWriterOptions?, bool, CancellationToken)`
 - `BJsonTextReader.Deserialize(string, BJsonTextReaderOptions?)`
+- `BJsonTextReader.DeserializeAsync(TextReader|Stream, BJsonTextReaderOptions?, bool, CancellationToken)`
 
 ## DOM Utility API
 
