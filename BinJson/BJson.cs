@@ -3,6 +3,7 @@
 using System;
 using System.IO;
 using Krampus.BinJson.Binary;
+using Krampus.BinJson.Error;
 using Krampus.BinJson.Serialization;
 using Krampus.BinJson.Text;
 
@@ -63,7 +64,7 @@ namespace Krampus.BinJson
         public static BJsonValue Parse(string json)
         {
             if (json is null)
-                throw new ArgumentNullException(nameof(json));
+                throw new BJsonValidationException("Parameter 'json' cannot be null.");
 
             return BJsonTextReader.Deserialize(json);
         }
@@ -71,7 +72,7 @@ namespace Krampus.BinJson
         public static BJsonValue Parse(string json, BJsonTextReaderOptions? options)
         {
             if (json is null)
-                throw new ArgumentNullException(nameof(json));
+                throw new BJsonValidationException("Parameter 'json' cannot be null.");
 
             return BJsonTextReader.Deserialize(json, options);
         }
@@ -109,7 +110,7 @@ namespace Krampus.BinJson
         public static T? Parse<T>(string json, BJsonSerializerOptions? serializerOptions = null, BJsonTextReaderOptions? textOptions = null)
         {
             if (json is null)
-                throw new ArgumentNullException(nameof(json));
+                throw new BJsonValidationException("Parameter 'json' cannot be null.");
 
             return Deserialize<T>(BJsonTextReader.Deserialize(json, textOptions), serializerOptions);
         }

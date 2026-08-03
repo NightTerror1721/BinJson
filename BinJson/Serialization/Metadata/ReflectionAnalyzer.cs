@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using Krampus.BinJson.Error;
 
 namespace Krampus.BinJson.Serialization.Metadata
 {
@@ -12,11 +13,11 @@ namespace Krampus.BinJson.Serialization.Metadata
         public static TypeMetadata Analyze(Type type, BJsonSerializerOptions options, Func<Type, BJsonConverterAttribute?, IBJsonConverter?> resolveConverter)
         {
             if (type is null)
-                throw new ArgumentNullException(nameof(type));
+                throw new BJsonMetadataException("Parameter 'type' cannot be null.");
             if (options is null)
-                throw new ArgumentNullException(nameof(options));
+                throw new BJsonMetadataException("Parameter 'options' cannot be null.");
             if (resolveConverter is null)
-                throw new ArgumentNullException(nameof(resolveConverter));
+                throw new BJsonMetadataException("Parameter 'resolveConverter' cannot be null.");
 
             var members = new List<MemberMetadata>();
             MemberMetadata? extensionDataMember = null;

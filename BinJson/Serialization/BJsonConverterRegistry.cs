@@ -2,6 +2,7 @@
 
 using System;
 using System.Collections.Generic;
+using Krampus.BinJson.Error;
 
 namespace Krampus.BinJson.Serialization
 {
@@ -17,7 +18,7 @@ namespace Krampus.BinJson.Serialization
         public void Add(IBJsonConverter converter)
         {
             if (converter is null)
-                throw new ArgumentNullException(nameof(converter));
+                throw new BJsonValidationException("Parameter 'converter' cannot be null.");
 
             _converters[converter.Type] = converter;
         }
@@ -25,7 +26,7 @@ namespace Krampus.BinJson.Serialization
         public void AddRange(IEnumerable<IBJsonConverter> converters)
         {
             if (converters is null)
-                throw new ArgumentNullException(nameof(converters));
+                throw new BJsonValidationException("Parameter 'converters' cannot be null.");
 
             foreach (var converter in converters)
                 Add(converter);
@@ -34,7 +35,7 @@ namespace Krampus.BinJson.Serialization
         public bool TryGetConverter(Type type, out IBJsonConverter converter)
         {
             if (type is null)
-                throw new ArgumentNullException(nameof(type));
+                throw new BJsonValidationException("Parameter 'type' cannot be null.");
 
             if (_converters.TryGetValue(type, out converter!))
                 return true;

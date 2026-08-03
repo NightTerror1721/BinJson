@@ -1,6 +1,7 @@
 #nullable enable
 
 using System;
+using Krampus.BinJson.Error;
 
 namespace Krampus.BinJson.Serialization
 {
@@ -47,8 +48,8 @@ namespace Krampus.BinJson.Serialization
         /// </param>
         public BJsonVersionContextAttribute(Type versionType, string currentVersion)
         {
-            VersionType = versionType ?? throw new ArgumentNullException(nameof(versionType));
-            CurrentVersion = currentVersion ?? throw new ArgumentNullException(nameof(currentVersion));
+            VersionType = versionType ?? throw new BJsonValidationException("Parameter 'versionType' cannot be null.");
+            CurrentVersion = currentVersion ?? throw new BJsonValidationException("Parameter 'currentVersion' cannot be null.");
         }
 
         /// <summary>The concrete type used to represent versions.</summary>

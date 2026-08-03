@@ -1,6 +1,7 @@
 #nullable enable
 
 using System;
+using Krampus.BinJson.Error;
 
 namespace Krampus.BinJson.Serialization
 {
@@ -42,7 +43,7 @@ namespace Krampus.BinJson.Serialization
         /// </param>
         public BJsonIgnoreWhenAttribute(string methodName)
         {
-            MethodName = methodName ?? throw new ArgumentNullException(nameof(methodName));
+            MethodName = methodName ?? throw new BJsonValidationException("Parameter 'methodName' cannot be null.");
         }
 
         /// <summary>

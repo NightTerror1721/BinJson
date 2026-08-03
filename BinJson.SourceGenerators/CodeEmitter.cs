@@ -64,6 +64,9 @@ namespace Krampus.BinJson.SourceGenerators
                 // Cached version fields
                 EmitCachedVersionFields(code, model);
 
+                // Cached extension-data keys
+                EmitExtensionDataKnownPropertiesField(code, model);
+
                 // Serialize method
                 EmitSerializeMethod(code, model);
                 code.AppendLine();
@@ -395,7 +398,7 @@ namespace Krampus.BinJson.SourceGenerators
             code.AppendLine();
             code.Comment(isUsingFactory ? "Create instance via factory method" : "Create instance via constructor");
 
-            var paramList = string.Join(", ", parameters.Select(p => p.ParameterName));
+            var paramList = string.Join(", ", parameters.Select(p => p.IsNullable || p.IsValueType ? p.ParameterName : $"{p.ParameterName}!"));
             if (!string.IsNullOrEmpty(model.Configuration.FactoryMethodName))
                 code.AppendLine($"var instance = {model.TypeName}.{model.Configuration.FactoryMethodName}({paramList});");
             else
@@ -446,7 +449,7 @@ namespace Krampus.BinJson.SourceGenerators
 
             var deserializationCode = GetDeserializationExpression(param.ParameterType, $"{param.ParameterName}Value", "context");
             code.AppendLine($"    ? {deserializationCode}");
-            code.AppendLine($"    : default({param.ParameterType});");
+            code.AppendLine($"    : {(param.IsNullable || param.IsValueType ? $"default({param.ParameterType})" : "default!")};");
 
             // Track required member presence
             if (isRequired)
@@ -516,7 +519,7 @@ namespace Krampus.BinJson.SourceGenerators
                 code.AppendLine("else");
                 using (code.Scope())
                 {
-                    code.AppendLine($"throw new System.InvalidOperationException($\"Required member '{jsonName}' was not present in the JSON.\");");
+                    code.AppendLine($"throw new Krampus.BinJson.Error.BJsonValidationException($\"Required member '{jsonName}' was not present in the JSON.\");");
                 }
             }
 
@@ -720,24 +723,14 @@ namespace Krampus.BinJson.SourceGenerators
         private static void EmitExtensionDataDeserialization(CodeBuilder code, GeneratedTypeModel model, List<MemberModel> members)
         {
             var extensionMember = model.ExtensionDataMember!;
-            var knownProperties = members.Select(m => m.JsonName ?? m.MemberName).ToList();
 
             code.Comment("Collect extension data (unknown properties)");
             code.AppendLine($"instance.{extensionMember.MemberName} = new Dictionary<string, BJsonValue>();");
             code.AppendLine("foreach (var kvp in obj)");
             using (code.Scope())
             {
-                // Check if property is not in known list
-                if (knownProperties.Any())
-                {
-                    var knownPropsArray = string.Join(", ", knownProperties.Select(p => $"\"{p}\""));
-                    code.AppendLine($"if (!new[] {{ {knownPropsArray} }}.Contains(kvp.Key))");
-                    using (code.Scope())
-                    {
-                        code.AppendLine($"instance.{extensionMember.MemberName}[kvp.Key] = kvp.Value;");
-                    }
-                }
-                else
+                code.AppendLine("if (!_knownProperties.Contains(kvp.Key))");
+                using (code.Scope())
                 {
                     code.AppendLine($"instance.{extensionMember.MemberName}[kvp.Key] = kvp.Value;");
                 }
@@ -757,7 +750,7 @@ namespace Krampus.BinJson.SourceGenerators
                 code.AppendLine($"if (!_has_{member.MemberName})");
                 using (code.Scope())
                 {
-                    code.AppendLine($"throw new System.InvalidOperationException($\"Required member '{jsonName}' was not present in the JSON.\");");
+                    code.AppendLine($"throw new Krampus.BinJson.Error.BJsonValidationException($\"Required member '{jsonName}' was not present in the JSON.\");");
                 }
             }
         }
@@ -851,6 +844,22 @@ namespace Krampus.BinJson.SourceGenerators
             code.AppendLine();
         }
 
+        private static void EmitExtensionDataKnownPropertiesField(CodeBuilder code, GeneratedTypeModel model)
+        {
+            if (model.ExtensionDataMember == null)
+                return;
+
+            var knownProperties = model.AllMembers
+                .Where(m => !m.IsExtensionData)
+                .Select(m => m.JsonName ?? m.MemberName)
+                .ToList();
+
+            code.Comment("Cached known property names for extension data filtering");
+            var knownPropsInitializer = string.Join(", ", knownProperties.Select(p => $"\"{EscapeStringLiteral(p)}\""));
+            code.AppendLine($"private static readonly HashSet<string> _knownProperties = new HashSet<string>(StringComparer.Ordinal) {{ {knownPropsInitializer} }};");
+            code.AppendLine();
+        }
+
         private static void EmitVersionGuardOpen(CodeBuilder code, MemberModel member)
         {
             var v = member.Version!;
@@ -892,12 +901,23 @@ namespace Krampus.BinJson.SourceGenerators
         private static string FormatConstantLiteral(object? value)
         {
             if (value == null) return "null";
-            if (value is string s) return $"\"{ s }\"";
+            if (value is string s) return $"\"{ EscapeStringLiteral(s) }\"";
             if (value is bool b) return b ? "true" : "false";
             if (value is char c) return $"'{c}'";
             if (value is float f) return $"{f}f";
             if (value is double d) return $"{d}";
             return value.ToString() ?? "default";
+        }
+
+        private static string EscapeStringLiteral(string value)
+        {
+            return value
+                .Replace("\\", "\\\\")
+                .Replace("\"", "\\\"")
+                .Replace("\r", "\\r")
+                .Replace("\n", "\\n")
+                .Replace("\t", "\\t")
+                .Replace("\0", "\\0");
         }
     }
 }

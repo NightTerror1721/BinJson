@@ -33,11 +33,13 @@ namespace Krampus.BinJson.SourceGenerators.Models
         public ConstructorParameterModel(
             string parameterName,
             string parameterType,
-            bool isNullable)
+            bool isNullable,
+            bool isValueType)
         {
             ParameterName = parameterName;
             ParameterType = parameterType;
             IsNullable = isNullable;
+            IsValueType = isValueType;
         }
 
         /// <summary>Parameter name as declared in constructor</summary>
@@ -48,6 +50,9 @@ namespace Krampus.BinJson.SourceGenerators.Models
 
         /// <summary>True if parameter type is nullable</summary>
         public bool IsNullable { get; }
+
+        /// <summary>True if parameter type is a value type</summary>
+        public bool IsValueType { get; }
 
         /// <summary>Corresponding JSON property name</summary>
         public string? JsonName { get; set; }

@@ -4,6 +4,7 @@ using System;
 using System.Buffers.Binary;
 using System.IO;
 using System.Text;
+using Krampus.BinJson.Error;
 
 namespace Krampus.BinJson.Binary
 {
@@ -17,9 +18,9 @@ namespace Krampus.BinJson.Binary
         public BJsonBinaryReader(Stream stream, bool leaveOpen = false)
         {
             if (stream is null)
-                throw new ArgumentNullException(nameof(stream));
+                throw new BJsonValidationException("Parameter 'stream' cannot be null.");
             if (!stream.CanRead)
-                throw new ArgumentException("Stream must be readable.", nameof(stream));
+                throw new BJsonValidationException("Stream must be readable.");
 
             _stream = stream;
             _leaveOpen = leaveOpen;
@@ -27,7 +28,14 @@ namespace Krampus.BinJson.Binary
 
         public BJsonValue Read()
         {
-            return ReadValue();
+            try
+            {
+                return ReadValue();
+            }
+            catch (Exception ex) when (!(ex is BJsonException))
+            {
+                throw new BJsonBinaryFormatException("Failed to deserialize binary BinJson payload.", ex);
+            }
         }
 
         public void Dispose()
@@ -90,7 +98,7 @@ namespace Krampus.BinJson.Binary
                 case BJsonValueTypeCode.Binary:
                     return BJsonValue.Create(ReadBinary());
                 default:
-                    throw new InvalidDataException($"Invalid BJson type code: 0x{(byte)typeCode:X2}");
+                    throw new BJsonBinaryFormatException($"Invalid BJson type code: 0x{(byte)typeCode:X2}");
             }
         }
 
@@ -116,7 +124,7 @@ namespace Krampus.BinJson.Binary
             {
                 string key = ReadStringData();
                 if (obj.ContainsKey(key))
-                    throw new InvalidDataException($"Duplicate object key '{key}' is not allowed.");
+                    throw new BJsonBinaryFormatException($"Duplicate object key '{key}' is not allowed.");
 
                 obj.Add(key, ReadValue());
             }
@@ -145,7 +153,7 @@ namespace Krampus.BinJson.Binary
         {
             int value = _stream.ReadByte();
             if (value < 0)
-                throw new EndOfStreamException("Unexpected end of stream while reading BinJson data.");
+                throw new BJsonBinaryFormatException("Unexpected end of stream while reading BinJson data.");
             return (byte)value;
         }
 
@@ -209,7 +217,7 @@ namespace Krampus.BinJson.Binary
         {
             int value = ReadInt32();
             if (value < 0)
-                throw new InvalidDataException($"{name} cannot be negative.");
+                throw new BJsonBinaryFormatException($"{name} cannot be negative.");
             return value;
         }
 
@@ -227,7 +235,7 @@ namespace Krampus.BinJson.Binary
             {
                 int bytesRead = _stream.Read(buffer.Slice(totalRead));
                 if (bytesRead <= 0)
-                    throw new EndOfStreamException("Unexpected end of stream while reading BinJson data.");
+                    throw new BJsonBinaryFormatException("Unexpected end of stream while reading BinJson data.");
                 totalRead += bytesRead;
             }
         }

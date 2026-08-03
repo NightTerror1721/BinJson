@@ -6,6 +6,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Reflection;
+using Krampus.BinJson.Error;
 using Krampus.BinJson.Serialization.Metadata;
 
 namespace Krampus.BinJson.Serialization
@@ -27,76 +28,90 @@ namespace Krampus.BinJson.Serialization
 
         public BJsonValue SerializeValue(object? value, Type declaredType)
         {
-            if (value is null)
-                return BJsonValue.Null;
+            try
+            {
+                if (value is null)
+                    return BJsonValue.Null;
 
-            if (value is BJsonValue jsonValue)
-                return jsonValue;
+                if (value is BJsonValue jsonValue)
+                    return jsonValue;
 
-            var runtimeType = value.GetType();
-            var polymorphicType = ResolvePolymorphicRuntimeType(declaredType, runtimeType);
-            if (polymorphicType is not null)
-                runtimeType = polymorphicType;
+                var runtimeType = value.GetType();
+                var polymorphicType = ResolvePolymorphicRuntimeType(declaredType, runtimeType);
+                if (polymorphicType is not null)
+                    runtimeType = polymorphicType;
 
-            if (value is IBJsonSerializable serializable)
-                return serializable.Serialize(_context);
+                if (value is IBJsonSerializable serializable)
+                    return serializable.Serialize(_context);
 
-            if (TryGetConverter(runtimeType, out var converter))
-                return converter.Serialize(value, _context);
+                if (TryGetConverter(runtimeType, out var converter))
+                    return converter.Serialize(value, _context);
 
-            if (TrySerializePrimitive(value, runtimeType, out var primitive))
-                return primitive;
+                if (TrySerializePrimitive(value, runtimeType, out var primitive))
+                    return primitive;
 
-            if (value is IDictionary dictionary)
-                return SerializeDictionary(dictionary);
+                if (value is IDictionary dictionary)
+                    return SerializeDictionary(dictionary);
 
-            if (value is IEnumerable enumerable && value is not string)
-                return SerializeEnumerable(enumerable);
+                if (value is IEnumerable enumerable && value is not string)
+                    return SerializeEnumerable(enumerable);
 
-            return SerializeAttributedObject(value, runtimeType);
+                return SerializeAttributedObject(value, runtimeType);
+            }
+            catch (Exception ex) when (!(ex is BJsonException))
+            {
+                throw new BJsonSerializationException($"Failed to serialize value of type '{declaredType.FullName}'.", ex);
+            }
         }
 
         public object? DeserializeValue(BJsonValue value, Type targetType)
         {
-            if (targetType == typeof(BJsonValue))
-                return value;
-
-            var nullableType = Nullable.GetUnderlyingType(targetType);
-            var effectiveTargetType = nullableType ?? targetType;
-
-            if (value.IsNull)
+            try
             {
-                if (!effectiveTargetType.IsValueType || nullableType is not null)
-                    return null;
+                if (targetType == typeof(BJsonValue))
+                    return value;
 
-                return Activator.CreateInstance(effectiveTargetType);
+                var nullableType = Nullable.GetUnderlyingType(targetType);
+                var effectiveTargetType = nullableType ?? targetType;
+
+                if (value.IsNull)
+                {
+                    if (!effectiveTargetType.IsValueType || nullableType is not null)
+                        return null;
+
+                    return Activator.CreateInstance(effectiveTargetType);
+                }
+
+                effectiveTargetType = ResolvePolymorphicTargetType(value, effectiveTargetType);
+
+                if (TryGetConverter(effectiveTargetType, out var converter))
+                    return converter.Deserialize(value, _context);
+
+                if (typeof(IBJsonDeserializable).IsAssignableFrom(effectiveTargetType))
+                {
+                    if (Activator.CreateInstance(effectiveTargetType) is not IBJsonDeserializable deserializable)
+                        throw new BJsonDeserializationException($"Type '{effectiveTargetType.FullName}' must have a public parameterless constructor to implement {nameof(IBJsonDeserializable)}.");
+
+                    var deserializationContext = new BJsonDeserializationContext(this, _options, effectiveTargetType);
+                    deserializable.Deserialize(value, deserializationContext);
+                    return deserializable;
+                }
+
+                if (TryDeserializePrimitive(value, effectiveTargetType, out var primitive))
+                    return primitive;
+
+                if (TryDeserializeDictionary(value, effectiveTargetType, out var dictionary))
+                    return dictionary;
+
+                if (TryDeserializeEnumerable(value, effectiveTargetType, out var enumerable))
+                    return enumerable;
+
+                return DeserializeAttributedObject(value, effectiveTargetType);
             }
-
-            effectiveTargetType = ResolvePolymorphicTargetType(value, effectiveTargetType);
-
-            if (TryGetConverter(effectiveTargetType, out var converter))
-                return converter.Deserialize(value, _context);
-
-            if (typeof(IBJsonDeserializable).IsAssignableFrom(effectiveTargetType))
+            catch (Exception ex) when (!(ex is BJsonException))
             {
-                if (Activator.CreateInstance(effectiveTargetType) is not IBJsonDeserializable deserializable)
-                    throw new InvalidOperationException($"Type '{effectiveTargetType.FullName}' must have a public parameterless constructor to implement {nameof(IBJsonDeserializable)}.");
-
-                var deserializationContext = new BJsonDeserializationContext(this, _options, effectiveTargetType);
-                deserializable.Deserialize(value, deserializationContext);
-                return deserializable;
+                throw new BJsonDeserializationException($"Failed to deserialize value to type '{targetType.FullName}'.", ex);
             }
-
-            if (TryDeserializePrimitive(value, effectiveTargetType, out var primitive))
-                return primitive;
-
-            if (TryDeserializeDictionary(value, effectiveTargetType, out var dictionary))
-                return dictionary;
-
-            if (TryDeserializeEnumerable(value, effectiveTargetType, out var enumerable))
-                return enumerable;
-
-            return DeserializeAttributedObject(value, effectiveTargetType);
         }
 
         private bool TryGetConverter(Type type, out IBJsonConverter converter)
@@ -142,7 +157,7 @@ namespace Krampus.BinJson.Serialization
                 return null;
 
             if (!typeof(IBJsonConverter).IsAssignableFrom(generatedType))
-                throw new InvalidOperationException($"Generated serializer '{generatedType.FullName}' must implement {nameof(IBJsonConverter)}.");
+                throw new BJsonConverterException($"Generated serializer '{generatedType.FullName}' must implement {nameof(IBJsonConverter)}.");
 
             return (IBJsonConverter?)Activator.CreateInstance(generatedType);
         }
@@ -150,13 +165,13 @@ namespace Krampus.BinJson.Serialization
         private static IBJsonConverter InstantiateConverter(Type converterType, Type targetType)
         {
             if (!typeof(IBJsonConverter).IsAssignableFrom(converterType))
-                throw new InvalidOperationException($"Converter '{converterType.FullName}' must implement {nameof(IBJsonConverter)}.");
+                throw new BJsonConverterException($"Converter '{converterType.FullName}' must implement {nameof(IBJsonConverter)}.");
 
             if (Activator.CreateInstance(converterType) is not IBJsonConverter converter)
-                throw new InvalidOperationException($"Converter '{converterType.FullName}' could not be instantiated.");
+                throw new BJsonConverterException($"Converter '{converterType.FullName}' could not be instantiated.");
 
             if (!converter.Type.IsAssignableFrom(targetType) && !targetType.IsAssignableFrom(converter.Type))
-                throw new InvalidOperationException($"Converter '{converterType.FullName}' is not compatible with type '{targetType.FullName}'.");
+                throw new BJsonConverterException($"Converter '{converterType.FullName}' is not compatible with type '{targetType.FullName}'.");
 
             return converter;
         }
@@ -536,7 +551,7 @@ namespace Krampus.BinJson.Serialization
         internal object DeserializeAttributedObject(BJsonValue value, Type targetType)
         {
             if (!value.TryGetObject(out var obj))
-                throw new InvalidOperationException($"Cannot deserialize value '{value.Type}' to '{targetType.FullName}'.");
+                throw new BJsonDeserializationException($"Cannot deserialize value '{value.Type}' to '{targetType.FullName}'.");
 
             var metadata = GetTypeMetadata(targetType);
             var instance = CreateObjectInstance(targetType, metadata, obj);
@@ -567,7 +582,7 @@ namespace Krampus.BinJson.Serialization
                     else
                     {
                         if (_options.StrictMode && member.Required)
-                            throw new InvalidOperationException($"Required member '{member.JsonName}' was not found while deserializing '{targetType.FullName}'.");
+                            throw new BJsonDeserializationException($"Required member '{member.JsonName}' was not found while deserializing '{targetType.FullName}'.");
 
                         // Apply default value if key is absent
                         ApplyDefaultValue(member, instance);
@@ -650,17 +665,17 @@ namespace Krampus.BinJson.Serialization
                 }
 
                 return metadata.FactoryMethod.Invoke(null, factoryArgs)
-                    ?? throw new InvalidOperationException($"Factory method on '{targetType.FullName}' returned null.");
+                    ?? throw new BJsonDeserializationException($"Factory method on '{targetType.FullName}' returned null.");
             }
 
             var constructorMetadata = metadata.Constructor;
             if (constructorMetadata is null)
-                throw new InvalidOperationException($"Type '{targetType.FullName}' has no usable constructor for deserialization.");
+                throw new BJsonDeserializationException($"Type '{targetType.FullName}' has no usable constructor for deserialization.");
 
             if (constructorMetadata.Parameters.Length == 0)
             {
                 return Activator.CreateInstance(targetType)
-                    ?? throw new InvalidOperationException($"Type '{targetType.FullName}' must have a usable constructor.");
+                    ?? throw new BJsonDeserializationException($"Type '{targetType.FullName}' must have a usable constructor.");
             }
 
             var args = new object?[constructorMetadata.Parameters.Length];

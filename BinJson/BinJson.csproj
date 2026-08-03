@@ -14,9 +14,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\BinJson.SourceGenerators\BinJson.SourceGenerators.csproj"
-                      OutputItemType="Analyzer"
-                      ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\BinJson.SourceGenerators\BinJson.SourceGenerators.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
 </Project>

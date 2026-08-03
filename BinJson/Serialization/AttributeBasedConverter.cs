@@ -1,6 +1,7 @@
 #nullable enable
 
 using System;
+using Krampus.BinJson.Error;
 using Krampus.BinJson.Serialization.Metadata;
 
 namespace Krampus.BinJson.Serialization
@@ -11,7 +12,7 @@ namespace Krampus.BinJson.Serialization
 
         public AttributeBasedConverter(BJsonObjectSerializer serializer)
         {
-            _serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
+            _serializer = serializer ?? throw new BJsonValidationException("Parameter 'serializer' cannot be null.");
         }
 
         public override BJsonValue Serialize(T? value, BJsonSerializationContext context)

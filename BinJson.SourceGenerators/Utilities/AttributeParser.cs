@@ -127,7 +127,8 @@ namespace Krampus.BinJson.SourceGenerators.Utilities
                         var paramModel = new ConstructorParameterModel(
                             param.Name,
                             param.Type.ToDisplayString(),
-                            param.Type.NullableAnnotation == Microsoft.CodeAnalysis.NullableAnnotation.Annotated);
+                            param.Type.NullableAnnotation == Microsoft.CodeAnalysis.NullableAnnotation.Annotated,
+                            param.Type.IsValueType);
 
                         config.FactoryMethodParameters.Add(paramModel);
                     }

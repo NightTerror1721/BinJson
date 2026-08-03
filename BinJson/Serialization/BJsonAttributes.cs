@@ -1,6 +1,7 @@
 #nullable enable
 
 using System;
+using Krampus.BinJson.Error;
 
 namespace Krampus.BinJson.Serialization
 {
@@ -19,7 +20,7 @@ namespace Krampus.BinJson.Serialization
     {
         public BJsonConverterAttribute(Type converterType)
         {
-            ConverterType = converterType ?? throw new ArgumentNullException(nameof(converterType));
+            ConverterType = converterType ?? throw new BJsonValidationException("Parameter 'converterType' cannot be null.");
         }
 
         public Type ConverterType { get; }
@@ -40,7 +41,7 @@ namespace Krampus.BinJson.Serialization
     {
         public BJsonPropertyNameAttribute(string name)
         {
-            Name = name ?? throw new ArgumentNullException(nameof(name));
+            Name = name ?? throw new BJsonValidationException("Parameter 'name' cannot be null.");
         }
 
         public string Name { get; }
@@ -83,7 +84,7 @@ namespace Krampus.BinJson.Serialization
     {
         public BJsonDerivedTypeAttribute(Type derivedType)
         {
-            DerivedType = derivedType ?? throw new ArgumentNullException(nameof(derivedType));
+            DerivedType = derivedType ?? throw new BJsonValidationException("Parameter 'derivedType' cannot be null.");
         }
 
         public Type DerivedType { get; }

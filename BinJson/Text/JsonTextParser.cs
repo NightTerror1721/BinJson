@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
+using Krampus.BinJson.Error;
 
 namespace Krampus.BinJson.Text
 {
@@ -23,7 +24,7 @@ namespace Krampus.BinJson.Text
         public static BJsonValue Parse(string json, BJsonTextReaderOptions? options = null)
         {
             if (json == null)
-                throw new ArgumentNullException(nameof(json));
+                throw new BJsonValidationException("Parameter 'json' cannot be null.");
 
             options ??= BJsonTextReaderOptions.Default;
 
@@ -32,7 +33,7 @@ namespace Krampus.BinJson.Text
             parser.SkipWhitespace();
 
             if (parser._position < parser._json.Length)
-                throw new FormatException($"Unexpected character at position {parser._position}: expected end of JSON.");
+                throw new BJsonParseException($"Unexpected character at position {parser._position}: expected end of JSON.");
 
             return value;
         }
@@ -42,7 +43,7 @@ namespace Krampus.BinJson.Text
             SkipWhitespace();
 
             if (_position >= _json.Length)
-                throw new FormatException("Unexpected end of JSON.");
+                throw new BJsonParseException("Unexpected end of JSON.");
 
             char c = _json[_position];
 
@@ -59,13 +60,13 @@ namespace Krampus.BinJson.Text
             if (c == '-' || char.IsDigit(c))
                 return ParseNumber();
 
-            throw new FormatException($"Unexpected character at position {_position}: '{c}'");
+            throw new BJsonParseException($"Unexpected character at position {_position}: '{c}'");
         }
 
         private BJsonValue ParseNull()
         {
             if (!TryConsume("null"))
-                throw new FormatException($"Invalid null literal at position {_position}.");
+                throw new BJsonParseException($"Invalid null literal at position {_position}.");
             return BJsonValue.Null;
         }
 
@@ -76,13 +77,13 @@ namespace Krampus.BinJson.Text
             if (TryConsume("false"))
                 return BJsonValue.False;
 
-            throw new FormatException($"Invalid boolean literal at position {_position}.");
+            throw new BJsonParseException($"Invalid boolean literal at position {_position}.");
         }
 
         private BJsonValue ParseString()
         {
             if (_json[_position] != '"')
-                throw new FormatException($"Expected '\"' at position {_position}.");
+                throw new BJsonParseException($"Expected '\"' at position {_position}.");
 
             _position++;
             var sb = new StringBuilder();
@@ -101,7 +102,7 @@ namespace Krampus.BinJson.Text
                 {
                     _position++;
                     if (_position >= _json.Length)
-                        throw new FormatException("Unexpected end of JSON in string escape.");
+                        throw new BJsonParseException("Unexpected end of JSON in string escape.");
 
                     char escaped = _json[_position];
                     _position++;
@@ -132,12 +133,12 @@ namespace Krampus.BinJson.Text
                             sb.Append(ParseUnicodeEscape());
                             break;
                         default:
-                            throw new FormatException($"Invalid escape sequence '\\{escaped}' at position {_position - 1}.");
+                            throw new BJsonParseException($"Invalid escape sequence '\\{escaped}' at position {_position - 1}.");
                     }
                 }
                 else if (c < ' ')
                 {
-                    throw new FormatException($"Unescaped control character (U+{((int)c):X4}) at position {_position}.");
+                    throw new BJsonParseException($"Unescaped control character (U+{((int)c):X4}) at position {_position}.");
                 }
                 else
                 {
@@ -146,19 +147,19 @@ namespace Krampus.BinJson.Text
                 }
             }
 
-            throw new FormatException("Unterminated string.");
+            throw new BJsonParseException("Unterminated string.");
         }
 
         private char ParseUnicodeEscape()
         {
             if (_position + 4 > _json.Length)
-                throw new FormatException("Incomplete Unicode escape sequence.");
+                throw new BJsonParseException("Incomplete Unicode escape sequence.");
 
             string hex = _json.Substring(_position, 4);
             _position += 4;
 
             if (!ushort.TryParse(hex, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out ushort codePoint))
-                throw new FormatException($"Invalid Unicode escape sequence '\\u{hex}'.");
+                throw new BJsonParseException($"Invalid Unicode escape sequence '\\u{hex}'.");
 
             return (char)codePoint;
         }
@@ -171,7 +172,7 @@ namespace Krampus.BinJson.Text
                 _position++;
 
             if (_position >= _json.Length || !char.IsDigit(_json[_position]))
-                throw new FormatException($"Invalid number at position {start}.");
+                throw new BJsonParseException($"Invalid number at position {start}.");
 
             if (_json[_position] == '0')
             {
@@ -191,7 +192,7 @@ namespace Krampus.BinJson.Text
                 _position++;
 
                 if (_position >= _json.Length || !char.IsDigit(_json[_position]))
-                    throw new FormatException($"Invalid number: expected digit after '.' at position {_position}.");
+                    throw new BJsonParseException($"Invalid number: expected digit after '.' at position {_position}.");
 
                 while (_position < _json.Length && char.IsDigit(_json[_position]))
                     _position++;
@@ -206,7 +207,7 @@ namespace Krampus.BinJson.Text
                     _position++;
 
                 if (_position >= _json.Length || !char.IsDigit(_json[_position]))
-                    throw new FormatException($"Invalid number: expected digit in exponent at position {_position}.");
+                    throw new BJsonParseException($"Invalid number: expected digit in exponent at position {_position}.");
 
                 while (_position < _json.Length && char.IsDigit(_json[_position]))
                     _position++;
@@ -217,7 +218,7 @@ namespace Krampus.BinJson.Text
             if (isFloat)
             {
                 if (!double.TryParse(numberText, NumberStyles.Float, CultureInfo.InvariantCulture, out double d))
-                    throw new FormatException($"Invalid float number '{numberText}' at position {start}.");
+                    throw new BJsonParseException($"Invalid float number '{numberText}' at position {start}.");
                 return BJsonValue.Create(d);
             }
             else
@@ -231,14 +232,14 @@ namespace Krampus.BinJson.Text
                 if (double.TryParse(numberText, NumberStyles.Float, CultureInfo.InvariantCulture, out double d))
                     return BJsonValue.Create(d);
 
-                throw new FormatException($"Number '{numberText}' is out of range at position {start}.");
+                throw new BJsonParseException($"Number '{numberText}' is out of range at position {start}.");
             }
         }
 
         private BJsonValue ParseArray()
         {
             if (_json[_position] != '[')
-                throw new FormatException($"Expected '[' at position {_position}.");
+                throw new BJsonParseException($"Expected '[' at position {_position}.");
 
             _position++;
             SkipWhitespace();
@@ -257,7 +258,7 @@ namespace Krampus.BinJson.Text
                 SkipWhitespace();
 
                 if (_position >= _json.Length)
-                    throw new FormatException("Unexpected end of JSON in array.");
+                    throw new BJsonParseException("Unexpected end of JSON in array.");
 
                 if (_json[_position] == ']')
                 {
@@ -266,7 +267,7 @@ namespace Krampus.BinJson.Text
                 }
 
                 if (_json[_position] != ',')
-                    throw new FormatException($"Expected ',' or ']' at position {_position}.");
+                    throw new BJsonParseException($"Expected ',' or ']' at position {_position}.");
 
                 _position++;
                 SkipWhitespace();
@@ -276,7 +277,7 @@ namespace Krampus.BinJson.Text
         private BJsonValue ParseObject()
         {
             if (_json[_position] != '{')
-                throw new FormatException($"Expected '{{' at position {_position}.");
+                throw new BJsonParseException($"Expected '{{' at position {_position}.");
 
             _position++;
             SkipWhitespace();
@@ -294,28 +295,28 @@ namespace Krampus.BinJson.Text
                 SkipWhitespace();
 
                 if (_position >= _json.Length || _json[_position] != '"')
-                    throw new FormatException($"Expected property name (string) at position {_position}.");
+                    throw new BJsonParseException($"Expected property name (string) at position {_position}.");
 
                 string key = ParseString().StringValue;
 
                 SkipWhitespace();
 
                 if (_position >= _json.Length || _json[_position] != ':')
-                    throw new FormatException($"Expected ':' after property name at position {_position}.");
+                    throw new BJsonParseException($"Expected ':' after property name at position {_position}.");
 
                 _position++;
 
                 BJsonValue value = ParseValue();
 
                 if (obj.ContainsKey(key))
-                    throw new FormatException($"Duplicate key '{key}' in object at position {_position}.");
+                    throw new BJsonParseException($"Duplicate key '{key}' in object at position {_position}.");
 
                 obj.Add(key, value);
 
                 SkipWhitespace();
 
                 if (_position >= _json.Length)
-                    throw new FormatException("Unexpected end of JSON in object.");
+                    throw new BJsonParseException("Unexpected end of JSON in object.");
 
                 if (_json[_position] == '}')
                 {
@@ -324,7 +325,7 @@ namespace Krampus.BinJson.Text
                 }
 
                 if (_json[_position] != ',')
-                    throw new FormatException($"Expected ',' or '}}' at position {_position}.");
+                    throw new BJsonParseException($"Expected ',' or '}}' at position {_position}.");
 
                 _position++;
             }
@@ -372,7 +373,7 @@ namespace Krampus.BinJson.Text
                             _position++;
                         }
 
-                        throw new FormatException("Unterminated block comment.");
+                        throw new BJsonParseException("Unterminated block comment.");
                     }
                 }
 

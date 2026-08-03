@@ -1,5 +1,7 @@
 ﻿#nullable enable
 
+using Krampus.BinJson.Error;
+
 namespace Krampus.BinJson
 {
     public enum BJsonValueType
@@ -56,7 +58,7 @@ namespace Krampus.BinJson
             BJsonValueTypeCode.Array => BJsonValueType.Array,
             BJsonValueTypeCode.Object => BJsonValueType.Object,
             BJsonValueTypeCode.Binary => BJsonValueType.Binary,
-            _ => throw new System.InvalidOperationException($"Invalid BJsonValueTypeCode: {code}"),
+            _ => throw new BJsonValidationException($"Invalid BJsonValueTypeCode: {code}"),
         };
     }
 }

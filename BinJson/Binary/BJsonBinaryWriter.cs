@@ -4,6 +4,7 @@ using System;
 using System.Buffers.Binary;
 using System.IO;
 using System.Text;
+using Krampus.BinJson.Error;
 
 namespace Krampus.BinJson.Binary
 {
@@ -17,9 +18,9 @@ namespace Krampus.BinJson.Binary
         public BJsonBinaryWriter(Stream stream, bool leaveOpen = false)
         {
             if (stream is null)
-                throw new ArgumentNullException(nameof(stream));
+                throw new BJsonValidationException("Parameter 'stream' cannot be null.");
             if (!stream.CanWrite)
-                throw new ArgumentException("Stream must be writable.", nameof(stream));
+                throw new BJsonValidationException("Stream must be writable.");
 
             _stream = stream;
             _leaveOpen = leaveOpen;
@@ -27,12 +28,26 @@ namespace Krampus.BinJson.Binary
 
         public void Write(BJsonValue value)
         {
-            WriteValue(value);
+            try
+            {
+                WriteValue(value);
+            }
+            catch (Exception ex) when (ex is not BJsonException)
+            {
+                throw new BJsonSerializationException("Failed to serialize BinJson value to binary format.", ex);
+            }
         }
 
         public void Flush()
         {
-            _stream.Flush();
+            try
+            {
+                _stream.Flush();
+            }
+            catch (Exception ex) when (ex is not BJsonException)
+            {
+                throw new BJsonSerializationException("Failed to flush binary BinJson writer.", ex);
+            }
         }
 
         public void Dispose()
@@ -86,7 +101,7 @@ namespace Krampus.BinJson.Binary
                     WriteBinary(value.BinaryValue);
                     return;
                 default:
-                    throw new InvalidOperationException($"Unsupported BJsonValueType: {value.Type}");
+                    throw new BJsonSerializationException($"Unsupported BJsonValueType: {value.Type}");
             }
         }
 

@@ -3,6 +3,7 @@
 using System;
 using System.Globalization;
 using System.IO;
+using Krampus.BinJson.Error;
 
 namespace Krampus.BinJson.Text
 {
@@ -20,7 +21,7 @@ namespace Krampus.BinJson.Text
 
         public BJsonTextWriter(TextWriter writer, BJsonTextWriterOptions? options, bool leaveOpen = false)
         {
-            _writer = writer ?? throw new ArgumentNullException(nameof(writer));
+            _writer = writer ?? throw new BJsonValidationException("Parameter 'writer' cannot be null.");
             _options = options ?? BJsonTextWriterOptions.Default;
             _leaveOpen = leaveOpen;
             _indentLevel = 0;
@@ -28,12 +29,26 @@ namespace Krampus.BinJson.Text
 
         public void Write(BJsonValue value)
         {
-            WriteValue(value);
+            try
+            {
+                WriteValue(value);
+            }
+            catch (Exception ex) when (!(ex is BJsonException))
+            {
+                throw new BJsonSerializationException("Failed to serialize BinJson value to JSON text.", ex);
+            }
         }
 
         public void Flush()
         {
-            _writer.Flush();
+            try
+            {
+                _writer.Flush();
+            }
+            catch (Exception ex) when (!(ex is BJsonException))
+            {
+                throw new BJsonSerializationException("Failed to flush JSON text writer.", ex);
+            }
         }
 
         public void Dispose()
@@ -87,14 +102,14 @@ namespace Krampus.BinJson.Text
                     WriteBinary(value.BinaryValue);
                     return;
                 default:
-                    throw new InvalidOperationException($"Unsupported BJsonValueType: {value.Type}");
+                    throw new BJsonSerializationException($"Unsupported BJsonValueType: {value.Type}");
             }
         }
 
         private void WriteFloat(double value)
         {
             if (!_options.SkipValidation && (double.IsNaN(value) || double.IsInfinity(value)))
-                throw new InvalidOperationException("JSON text cannot represent NaN or Infinity.");
+                throw new BJsonSerializationException("JSON text cannot represent NaN or Infinity.");
 
             string text = value.ToString("R", CultureInfo.InvariantCulture);
             if (text.IndexOfAny(new[] { '.', 'e', 'E' }) < 0)
@@ -238,7 +253,7 @@ namespace Krampus.BinJson.Text
         private void WriteBinary(BJsonBinary value)
         {
             if (!_options.AllowBinaryAsBase64)
-                throw new InvalidOperationException("Binary values are not allowed in JSON text output. Set BJsonTextWriterOptions.AllowBinaryAsBase64 to true to serialize as base64 strings.");
+                throw new BJsonSerializationException("Binary values are not allowed in JSON text output. Set BJsonTextWriterOptions.AllowBinaryAsBase64 to true to serialize as base64 strings.");
 
             WriteString(Convert.ToBase64String(value.AsSpan()));
         }

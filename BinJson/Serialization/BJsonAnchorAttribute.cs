@@ -1,6 +1,7 @@
 #nullable enable
 
 using System;
+using Krampus.BinJson.Error;
 
 namespace Krampus.BinJson.Serialization
 {
@@ -41,7 +42,7 @@ namespace Krampus.BinJson.Serialization
         /// </param>
         public BJsonAnchorAttribute(string anchorName)
         {
-            AnchorName = anchorName ?? throw new ArgumentNullException(nameof(anchorName));
+            AnchorName = anchorName ?? throw new BJsonValidationException("Parameter 'anchorName' cannot be null.");
         }
 
         /// <summary>The unique anchor name used in <c>{ "$ref": "anchorName" }</c> tokens.</summary>

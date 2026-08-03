@@ -1,6 +1,7 @@
 #nullable enable
 
 using System;
+using Krampus.BinJson.Error;
 using Krampus.BinJson.Serialization.BuiltIn;
 using Krampus.BinJson.Serialization.References;
 
@@ -44,7 +45,7 @@ namespace Krampus.BinJson.Serialization
         public void AddConverter(IBJsonConverter converter)
         {
             if (converter is null)
-                throw new ArgumentNullException(nameof(converter));
+                throw new BJsonValidationException("Parameter 'converter' cannot be null.");
 
             _converters.Add(converter);
         }

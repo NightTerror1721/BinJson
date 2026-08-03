@@ -363,7 +363,8 @@ namespace Krampus.BinJson.SourceGenerators
                 var paramModel = new ConstructorParameterModel(
                     param.Name,
                     param.Type.ToDisplayString(),
-                    TypeRegistry.IsNullable(param.Type));
+                    TypeRegistry.IsNullable(param.Type),
+                    param.Type.IsValueType);
 
                 // Check for [BJsonPropertyName] on the parameter itself
                 var propertyNameAttr = param.GetAttributes()
@@ -556,7 +557,7 @@ namespace Krampus.BinJson.SourceGenerators
             {
                 IPropertySymbol property => property.Type,
                 IFieldSymbol field => field.Type,
-                _ => throw new System.InvalidOperationException($"Cannot get type from {symbol.Kind}")
+                _ => null!
             };
         }
     }

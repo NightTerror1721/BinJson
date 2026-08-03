@@ -2,6 +2,7 @@
 
 using System;
 using System.Collections.Generic;
+using Krampus.BinJson.Error;
 using Krampus.BinJson.Serialization.References;
 
 namespace Krampus.BinJson.Serialization
@@ -32,7 +33,7 @@ namespace Krampus.BinJson.Serialization
 
         public BJsonValue Serialize(object? value, Type type)
         {
-            return _serializer.SerializeValue(value, type ?? throw new ArgumentNullException(nameof(type)));
+            return _serializer.SerializeValue(value, type ?? throw new BJsonValidationException("Parameter 'type' cannot be null."));
         }
 
         public T? Deserialize<T>(BJsonValue value)
@@ -42,7 +43,7 @@ namespace Krampus.BinJson.Serialization
 
         public object? Deserialize(BJsonValue value, Type type)
         {
-            return _serializer.DeserializeValue(value, type ?? throw new ArgumentNullException(nameof(type)));
+            return _serializer.DeserializeValue(value, type ?? throw new BJsonValidationException("Parameter 'type' cannot be null."));
         }
 
         internal BJsonValue SerializeAttributed(object value, Type type)
@@ -61,7 +62,7 @@ namespace Krampus.BinJson.Serialization
                 return;
 
             if (_objectStack.Count >= Options.MaxDepth)
-                throw new InvalidOperationException($"Maximum serialization depth of {Options.MaxDepth} exceeded.");
+                throw new BJsonSerializationException($"Maximum serialization depth of {Options.MaxDepth} exceeded.");
 
             _objectStack.Push(obj);
         }

@@ -1,6 +1,7 @@
 #nullable enable
 
 using System;
+using Krampus.BinJson.Error;
 
 namespace Krampus.BinJson.Serialization
 {
@@ -18,7 +19,7 @@ namespace Krampus.BinJson.Serialization
         public static BJsonValue Serialize(object? value, Type declaredType, BJsonSerializerOptions? options = null)
         {
             if (declaredType is null)
-                throw new ArgumentNullException(nameof(declaredType));
+                throw new BJsonValidationException("Parameter 'declaredType' cannot be null.");
 
             return new BJsonObjectSerializer(options).SerializeValue(value, declaredType);
         }
@@ -31,7 +32,7 @@ namespace Krampus.BinJson.Serialization
         public static object? Deserialize(BJsonValue value, Type targetType, BJsonSerializerOptions? options = null)
         {
             if (targetType is null)
-                throw new ArgumentNullException(nameof(targetType));
+                throw new BJsonValidationException("Parameter 'targetType' cannot be null.");
 
             return new BJsonObjectSerializer(options).DeserializeValue(value, targetType);
         }

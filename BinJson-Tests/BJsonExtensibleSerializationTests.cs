@@ -114,7 +114,7 @@ namespace Krampus.BinJson.Tests
         {
             var json = new BJsonObject();
 
-            Assert.Throws<InvalidOperationException>(() => BJson.Deserialize<RequiredModel>(BJsonValue.Create(json)));
+            Assert.Throws<Krampus.BinJson.Error.BJsonDeserializationException>(() => BJson.Deserialize<RequiredModel>(BJsonValue.Create(json)));
         }
 
         [Fact]

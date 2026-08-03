@@ -7,11 +7,11 @@ var save = new GameSave
     PlayerName = "Hero",
     Level = 12,
     LastCheckpoint = "Crystal Cave",
-    Inventory = new List<InventoryItem>
-    {
+    Inventory =
+    [
         new InventoryItem { Name = "Potion", Quantity = 3 },
         new InventoryItem { Name = "Key", Quantity = 1 }
-    }
+    ]
 };
 
 var serializerOptions = new BJsonSerializerOptions();

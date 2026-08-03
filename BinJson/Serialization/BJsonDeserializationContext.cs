@@ -1,6 +1,7 @@
 #nullable enable
 
 using System;
+using Krampus.BinJson.Error;
 using Krampus.BinJson.Serialization.References;
 
 namespace Krampus.BinJson.Serialization
@@ -12,8 +13,8 @@ namespace Krampus.BinJson.Serialization
         internal BJsonDeserializationContext(BJsonObjectSerializer serializer, BJsonSerializerOptions options, Type targetType)
         {
             _serializer = serializer;
-            Options = options ?? throw new ArgumentNullException(nameof(options));
-            TargetType = targetType ?? throw new ArgumentNullException(nameof(targetType));
+            Options = options ?? throw new BJsonValidationException("Parameter 'options' cannot be null.");
+            TargetType = targetType ?? throw new BJsonValidationException("Parameter 'targetType' cannot be null.");
             ReferenceResolver = options.ReferenceHandler?.CreateResolver();
         }
 
@@ -30,7 +31,7 @@ namespace Krampus.BinJson.Serialization
 
         public object? Deserialize(BJsonValue value, Type type)
         {
-            return _serializer.DeserializeValue(value, type ?? throw new ArgumentNullException(nameof(type)));
+            return _serializer.DeserializeValue(value, type ?? throw new BJsonValidationException("Parameter 'type' cannot be null."));
         }
     }
 }

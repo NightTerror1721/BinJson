@@ -2,6 +2,7 @@
 
 using System;
 using System.Runtime.CompilerServices;
+using Krampus.BinJson.Error;
 
 namespace Krampus.BinJson
 {
@@ -68,7 +69,7 @@ namespace Krampus.BinJson
                     TagArray => BJsonValueType.Array,
                     TagObject => BJsonValueType.Object,
                     TagBinary => BJsonValueType.Binary,
-                    _ => throw new InvalidOperationException("Invalid BJsonValue state.")
+                    _ => throw new BJsonValidationException("Invalid BJsonValue state.")
                 };
             }
         }
@@ -104,21 +105,21 @@ namespace Krampus.BinJson
 
         public bool IsNumber => IsInteger || IsFloat;
 
-        public sbyte SByteValue => IsInteger ? (sbyte)_data : throw new InvalidOperationException("Value is not an integer.");
-        public short ShortValue => IsInteger ? (short)_data : throw new InvalidOperationException("Value is not an integer.");
-        public int IntValue => IsInteger ? (int)_data : throw new InvalidOperationException("Value is not an integer.");
-        public long LongValue => IsInteger ? (long)_data : throw new InvalidOperationException("Value is not an integer.");
-        public byte ByteValue => IsInteger ? (byte)_data : throw new InvalidOperationException("Value is not an integer.");
-        public ushort UShortValue => IsInteger ? (ushort)_data : throw new InvalidOperationException("Value is not an integer.");
-        public uint UIntValue => IsInteger ? (uint)_data : throw new InvalidOperationException("Value is not an integer.");
-        public ulong ULongValue => IsInteger ? _data : throw new InvalidOperationException("Value is not an integer.");
-        public float FloatValue => IsFloat ? (float)BitConverter.Int64BitsToDouble((long)_data) : throw new InvalidOperationException("Value is not a float.");
-        public double DoubleValue => IsFloat ? BitConverter.Int64BitsToDouble((long)_data) : throw new InvalidOperationException("Value is not a float.");
-        public bool BoolValue => IsBoolean ? _data != 0 : throw new InvalidOperationException("Value is not a boolean.");
-        public string StringValue => IsString ? (string)_reference! : throw new InvalidOperationException("Value is not a string.");
-        public BJsonArray ArrayValue => IsArray ? (BJsonArray)_reference! : throw new InvalidOperationException("Value is not an array.");
-        public BJsonObject ObjectValue => IsObject ? (BJsonObject)_reference! : throw new InvalidOperationException("Value is not an object.");
-        public BJsonBinary BinaryValue => IsBinary ? (BJsonBinary)_reference! : throw new InvalidOperationException("Value is not binary.");
+        public sbyte SByteValue => IsInteger ? (sbyte)_data : throw new BJsonValidationException("Value is not an integer.");
+        public short ShortValue => IsInteger ? (short)_data : throw new BJsonValidationException("Value is not an integer.");
+        public int IntValue => IsInteger ? (int)_data : throw new BJsonValidationException("Value is not an integer.");
+        public long LongValue => IsInteger ? (long)_data : throw new BJsonValidationException("Value is not an integer.");
+        public byte ByteValue => IsInteger ? (byte)_data : throw new BJsonValidationException("Value is not an integer.");
+        public ushort UShortValue => IsInteger ? (ushort)_data : throw new BJsonValidationException("Value is not an integer.");
+        public uint UIntValue => IsInteger ? (uint)_data : throw new BJsonValidationException("Value is not an integer.");
+        public ulong ULongValue => IsInteger ? _data : throw new BJsonValidationException("Value is not an integer.");
+        public float FloatValue => IsFloat ? (float)BitConverter.Int64BitsToDouble((long)_data) : throw new BJsonValidationException("Value is not a float.");
+        public double DoubleValue => IsFloat ? BitConverter.Int64BitsToDouble((long)_data) : throw new BJsonValidationException("Value is not a float.");
+        public bool BoolValue => IsBoolean ? _data != 0 : throw new BJsonValidationException("Value is not a boolean.");
+        public string StringValue => IsString ? (string)_reference! : throw new BJsonValidationException("Value is not a string.");
+        public BJsonArray ArrayValue => IsArray ? (BJsonArray)_reference! : throw new BJsonValidationException("Value is not an array.");
+        public BJsonObject ObjectValue => IsObject ? (BJsonObject)_reference! : throw new BJsonValidationException("Value is not an object.");
+        public BJsonBinary BinaryValue => IsBinary ? (BJsonBinary)_reference! : throw new BJsonValidationException("Value is not binary.");
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool TryGetSByte(out sbyte value)
