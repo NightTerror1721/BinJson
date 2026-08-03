@@ -104,7 +104,8 @@ Writers must produce the smallest encoding by byte size.
 
 - `FixObject`: small objects (`0..15`).
 - `ObjectVar`: large objects (`VarUInt pair count`).
-- Object keys are always encoded as: `VarUInt keyLength` + `UTF-8 key bytes`.
+- Object keys are encoded using the same canonical string encoding as regular string values:
+	- `FixStr`, `String8`, `String16`, `String32`, or `StringRef`
 
 ### Binary
 
@@ -205,11 +206,11 @@ Canonical binary bytes (hex):
 
 ```text
 C3                         // FixObject, 3 pairs
-06 70 6C 61 79 65 72       // key "player" (VarUInt len=6 + bytes)
+96 70 6C 61 79 65 72       // key "player" (FixStr)
 94 48 65 72 6F             // FixStr "Hero"
-05 6C 65 76 65 6C          // key "level" (VarUInt len=5 + bytes)
+95 6C 65 76 65 6C          // key "level" (FixStr)
 0A                         // Positive FixInt 10
-06 61 63 74 69 76 65       // key "active" (VarUInt len=6 + bytes)
+96 61 63 74 69 76 65       // key "active" (FixStr)
 82                         // BoolTrue
 ```
 

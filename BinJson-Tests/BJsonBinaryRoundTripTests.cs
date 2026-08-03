@@ -112,8 +112,8 @@ namespace Krampus.BinJson.Tests
             byte[] payload =
             {
                 0xC2,
-                0x02, (byte)'i', (byte)'d', 0x01,
-                0x02, (byte)'i', (byte)'d', 0x02
+                0x92, (byte)'i', (byte)'d', 0x01,
+                0x92, (byte)'i', (byte)'d', 0x02
             };
 
             using var stream = new MemoryStream(payload);
@@ -371,13 +371,14 @@ namespace Krampus.BinJson.Tests
             byte[] bytes = BJsonBinaryWriter.Serialize(value, new BJsonBinaryWriterOptions { EnableStringTable = false, EnablePackedArrays = false });
 
             Assert.Equal(0xC1, bytes[0]);
-            Assert.Equal(0x7F, bytes[1]);
+            Assert.Equal((byte)BJsonValueTypeCode.String8, bytes[1]);
+            Assert.Equal(0x7F, bytes[2]);
             var parsed = BJsonBinaryReader.Deserialize(bytes);
             Assert.Equal(value, parsed);
         }
 
         [Fact]
-        public void RoundTrip_ObjectKeyLength_128_UsesTwoByteVarUInt()
+        public void RoundTrip_ObjectKeyLength_128_UsesString8()
         {
             string key = new string('k', 128);
             var value = BJsonValue.Create(new BJsonObject { [key] = 1 });
@@ -385,8 +386,35 @@ namespace Krampus.BinJson.Tests
             byte[] bytes = BJsonBinaryWriter.Serialize(value, new BJsonBinaryWriterOptions { EnableStringTable = false, EnablePackedArrays = false });
 
             Assert.Equal(0xC1, bytes[0]);
-            Assert.Equal(0x80, bytes[1]);
-            Assert.Equal(0x01, bytes[2]);
+            Assert.Equal((byte)BJsonValueTypeCode.String8, bytes[1]);
+            Assert.Equal(0x80, bytes[2]);
+            var parsed = BJsonBinaryReader.Deserialize(bytes);
+            Assert.Equal(value, parsed);
+        }
+
+        [Fact]
+        public void RoundTrip_ObjectKeys_CanUseStringRef_WhenStringTableEnabled()
+        {
+            var value = BJsonValue.Create(new BJsonArray
+            {
+                BJsonValue.Create(new BJsonObject { ["id"] = 1 }),
+                BJsonValue.Create(new BJsonObject { ["id"] = 2 }),
+                BJsonValue.Create(new BJsonObject { ["id"] = 3 }),
+                BJsonValue.Create(new BJsonObject { ["id"] = 4 }),
+            });
+
+            byte[] bytes = BJsonBinaryWriter.Serialize(value, new BJsonBinaryWriterOptions
+            {
+                EnableStringTable = true,
+                EnablePackedArrays = false,
+            });
+
+            Assert.Contains((byte)BJsonValueTypeCode.StringTable, bytes);
+
+            int firstObjectIndex = Array.IndexOf(bytes, (byte)0xC1);
+            Assert.True(firstObjectIndex >= 0);
+            Assert.Equal((byte)BJsonValueTypeCode.StringRef, bytes[firstObjectIndex + 1]);
+
             var parsed = BJsonBinaryReader.Deserialize(bytes);
             Assert.Equal(value, parsed);
         }

@@ -328,12 +328,17 @@ namespace Krampus.BinJson.Binary
 
         private string ReadObjectKey()
         {
-            int len = ReadVarUIntAsCount("Object key length");
-            if (len == 0)
-                return string.Empty;
+            BJsonValue keyValue = ReadValue();
+            if (keyValue.Type != BJsonValueType.String)
+                throw CreateFormatException(
+                    "Invalid object key encoding. Expected string value.",
+                    "ObjectKey",
+                    details: new System.Collections.Generic.Dictionary<string, object?>
+                    {
+                        ["actualType"] = keyValue.Type.ToString()
+                    });
 
-            string key = ReadStringBytes(len);
-            return key;
+            return keyValue.StringValue;
         }
 
         private void ReadHeader()

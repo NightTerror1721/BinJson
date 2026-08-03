@@ -505,10 +505,7 @@ namespace Krampus.BinJson.Binary
 
         private void WriteObjectKey(string key)
         {
-            byte[] bytes = Utf8.GetBytes(key);
-            WriteVarUInt((ulong)bytes.Length);
-            _stream.Write(bytes, 0, bytes.Length);
-            _bytesWritten += bytes.Length;
+            WriteString(key);
         }
 
         private void WriteTypeCode(BJsonValueTypeCode code)

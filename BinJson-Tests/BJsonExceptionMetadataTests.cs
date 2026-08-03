@@ -83,7 +83,7 @@ namespace Krampus.BinJson.Tests
         [Fact]
         public void BinaryFormatException_ContractSnapshot_IsStable()
         {
-            using var stream = new MemoryStream(new byte[] { 0xD5, 0x01, 0x01 });
+            using var stream = new MemoryStream(new byte[] { 0xD5, 0x01, 0x91 });
 
             var ex = Assert.Throws<BJsonBinaryFormatException>(() => BJsonBinaryReader.Deserialize(stream));
 
