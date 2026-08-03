@@ -53,8 +53,8 @@ namespace Krampus.BinJson.SourceGenerators
             {
                 foreach (var prop in Properties)
                     yield return prop;
-                foreach (var field in Fields)
-                    yield return field;
+                foreach (var fd in Fields)
+                    yield return fd;
             }
         }
 
