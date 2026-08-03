@@ -331,6 +331,102 @@ namespace Krampus.BinJson.Tests
             Assert.True(floatLarge.CompareTo(intLarge) < 0);  // 100.5 < 200
         }
 
+        [Fact]
+        public void RelationalOperators_UseCompareToSemantics()
+        {
+            BJsonValue a = 1;
+            BJsonValue b = 2.0;
+
+            Assert.True(a < b);
+            Assert.True(a <= b);
+            Assert.True(b > a);
+            Assert.True(b >= a);
+        }
+
+        #endregion
+
+        #region Conversion Operator Tests
+
+        [Fact]
+        public void ImplicitOperator_Primitives_CreatesExpectedTypes()
+        {
+            BJsonValue intValue = 42;
+            BJsonValue strValue = "hello";
+            BJsonValue boolValue = true;
+
+            Assert.True(intValue.IsInteger);
+            Assert.Equal(42, intValue.IntValue);
+            Assert.True(strValue.IsString);
+            Assert.Equal("hello", strValue.StringValue);
+            Assert.True(boolValue.IsBoolean);
+            Assert.True(boolValue.BoolValue);
+        }
+
+        [Fact]
+        public void ExplicitOperator_ExtractsTypedValues()
+        {
+            BJsonValue value = 123;
+            int intValue = (int)value;
+
+            Assert.Equal(123, intValue);
+            Assert.Throws<Krampus.BinJson.Error.BJsonValidationException>(() =>
+            {
+                var _ = (string)value;
+            });
+        }
+
+        #endregion
+
+        #region Coercion Tests
+
+        [Fact]
+        public void AsInt_AsLong_AsDouble_WorkForNumericValues()
+        {
+            var fromInt = BJsonValue.Create(42);
+            var fromDouble = BJsonValue.Create(42.8);
+
+            Assert.Equal(42, fromInt.AsInt());
+            Assert.Equal(42L, fromInt.AsLong());
+            Assert.Equal(42.0, fromInt.AsDouble());
+            Assert.Equal(42, fromDouble.AsInt());
+        }
+
+        [Fact]
+        public void AsInt_ThrowsForInvalidNumeric()
+        {
+            var nan = BJsonValue.Create(double.NaN);
+            Assert.Throws<Krampus.BinJson.Error.BJsonValidationException>(() => nan.AsInt());
+        }
+
+        #endregion
+
+        #region Clone And ToString Tests
+
+        [Fact]
+        public void DeepClone_NestedObject_IsIndependent()
+        {
+            var nested = new BJsonObject { ["x"] = 5 };
+            var obj = new BJsonObject { ["nested"] = nested };
+            var value = BJsonValue.Create(obj);
+
+            var clone = value.DeepClone();
+
+            Assert.True(clone.IsObject);
+            Assert.NotSame(value.ObjectValue, clone.ObjectValue);
+            Assert.True(clone.ObjectValue.TryGetObject("nested", out var nestedClone));
+            Assert.NotSame(nested, nestedClone);
+            Assert.Equal(5, nestedClone["x"].IntValue);
+        }
+
+        [Fact]
+        public void ToString_UsesReadableFormatting()
+        {
+            Assert.Equal("null", BJsonValue.Null.ToString());
+            Assert.Equal("true", BJsonValue.True.ToString());
+            Assert.Equal("5", BJsonValue.Create(5).ToString());
+            Assert.Equal("\"a\\n\"", BJsonValue.Create("a\n").ToString());
+        }
+
         #endregion
 
         #region Type Checking Tests

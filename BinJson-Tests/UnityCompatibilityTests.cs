@@ -147,7 +147,7 @@ namespace Krampus.BinJson.Tests
             var binary = new BJsonBinary(new byte[] { 1, 2, 3 });
             var value = BJsonValue.Create(binary);
 
-            var ex = Assert.Throws<InvalidOperationException>(() => BJsonTextWriter.Serialize(value));
+            var ex = Assert.Throws<Krampus.BinJson.Error.BJsonSerializationException>(() => BJsonTextWriter.Serialize(value));
             Assert.Contains("Binary values are not allowed", ex.Message);
         }
 

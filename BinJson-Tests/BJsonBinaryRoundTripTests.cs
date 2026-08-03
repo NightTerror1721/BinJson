@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Text;
 using Krampus.BinJson;
 using Krampus.BinJson.Binary;
 using Xunit;
@@ -92,7 +93,8 @@ namespace Krampus.BinJson.Tests
         {
             using var stream = new MemoryStream(new byte[] { 0x7F });
 
-            Assert.Throws<InvalidDataException>(() => BJsonBinaryReader.Deserialize(stream));
+            var ex = Assert.Throws<Krampus.BinJson.Error.BJsonBinaryFormatException>(() => BJsonBinaryReader.Deserialize(stream));
+            Assert.Contains("Invalid BJson type code", ex.Message);
         }
 
         [Fact]
@@ -100,7 +102,8 @@ namespace Krampus.BinJson.Tests
         {
             using var stream = new MemoryStream(new byte[] { 0x0D, 0x05, 0x00, 0x00, 0x00, 0x41, 0x42 });
 
-            Assert.Throws<EndOfStreamException>(() => BJsonBinaryReader.Deserialize(stream));
+            var ex = Assert.Throws<Krampus.BinJson.Error.BJsonBinaryFormatException>(() => BJsonBinaryReader.Deserialize(stream));
+            Assert.Contains("Unexpected end of stream", ex.Message);
         }
 
         [Fact]
@@ -116,7 +119,47 @@ namespace Krampus.BinJson.Tests
 
             using var stream = new MemoryStream(payload);
 
-            Assert.Throws<InvalidDataException>(() => BJsonBinaryReader.Deserialize(stream));
+            var ex = Assert.Throws<Krampus.BinJson.Error.BJsonBinaryFormatException>(() => BJsonBinaryReader.Deserialize(stream));
+            Assert.Contains("Duplicate object key", ex.Message);
+        }
+
+        [Fact]
+        public void BinaryHelpers_ToArray_CopyTo_AndOperators()
+        {
+            var left = new BJsonBinary(new byte[] { 1, 2, 3 });
+            var right = new BJsonBinary(new byte[] { 4, 5 });
+
+            var combined = left + right;
+            Assert.Equal(new byte[] { 1, 2, 3, 4, 5 }, combined.AsSpan().ToArray());
+
+            var copy = left.ToArray();
+            copy[0] = 200;
+            Assert.Equal(1, left[0]);
+
+            var destination = new byte[5];
+            right.CopyTo(destination, 2);
+            Assert.Equal(new byte[] { 0, 0, 4, 5, 0 }, destination);
+
+            Assert.True(left == new BJsonBinary(new byte[] { 1, 2, 3 }));
+            Assert.True(left != right);
+        }
+
+        [Fact]
+        public void BinaryCodecs_Base64_Hex_String_RoundTrip()
+        {
+            var original = new BJsonBinary(new byte[] { 0xDE, 0xAD, 0xBE, 0xEF });
+
+            var b64 = original.ToBase64();
+            var fromB64 = BJsonBinary.FromBase64(b64);
+            Assert.Equal(original, fromB64);
+
+            var hex = original.ToHex();
+            var fromHex = BJsonBinary.FromHex(hex);
+            Assert.Equal(original, fromHex);
+
+            var text = "hello";
+            var fromText = BJsonBinary.FromString(text, Encoding.UTF8);
+            Assert.Equal(text, fromText.DecodeString(Encoding.UTF8));
         }
 
         private static void AssertRoundTrip(BJsonValue value)

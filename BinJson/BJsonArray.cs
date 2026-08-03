@@ -1,5 +1,6 @@
 ﻿#nullable enable
 
+using System;
 using System.Collections;
 using System.Collections.Generic;
 
@@ -37,6 +38,12 @@ namespace Krampus.BinJson
         }
 
         public int Count => _values.Count;
+
+        public int Capacity
+        {
+            get => _values.Capacity;
+            set => _values.Capacity = value;
+        }
 
         public bool IsReadOnly => false;
 
@@ -126,6 +133,188 @@ namespace Krampus.BinJson
             }
             value = _values[index];
             return true;
+        }
+
+        public BJsonValue GetOrDefault(int index, BJsonValue defaultValue = default)
+        {
+            return index >= 0 && index < _values.Count ? _values[index] : defaultValue;
+        }
+
+        public int GetIntOrDefault(int index, int defaultValue = 0)
+        {
+            return TryGetInt(index, out var value) ? value : defaultValue;
+        }
+
+        public long GetLongOrDefault(int index, long defaultValue = 0)
+        {
+            return TryGetLong(index, out var value) ? value : defaultValue;
+        }
+
+        public double GetDoubleOrDefault(int index, double defaultValue = 0)
+        {
+            return TryGetDouble(index, out var value) ? value : defaultValue;
+        }
+
+        public bool GetBoolOrDefault(int index, bool defaultValue = false)
+        {
+            return TryGetBool(index, out var value) ? value : defaultValue;
+        }
+
+        public string? GetStringOrDefault(int index, string? defaultValue = null)
+        {
+            return TryGetString(index, out var value) ? value : defaultValue;
+        }
+
+        public int EnsureCapacity(int capacity)
+        {
+            if (capacity <= _values.Capacity)
+                return _values.Capacity;
+
+            _values.Capacity = capacity;
+            return _values.Capacity;
+        }
+
+        public void TrimExcess() => _values.TrimExcess();
+
+        public int FindIndex(Func<BJsonValue, bool> predicate)
+        {
+            if (predicate is null)
+                throw new ArgumentNullException(nameof(predicate));
+            return _values.FindIndex(value => predicate(value));
+        }
+
+        public int FindLastIndex(Func<BJsonValue, bool> predicate)
+        {
+            if (predicate is null)
+                throw new ArgumentNullException(nameof(predicate));
+            return _values.FindLastIndex(value => predicate(value));
+        }
+
+        public bool Find(Func<BJsonValue, bool> predicate, out BJsonValue value)
+        {
+            int index = FindIndex(predicate);
+            if (index >= 0)
+            {
+                value = _values[index];
+                return true;
+            }
+
+            value = BJsonValue.Null;
+            return false;
+        }
+
+        public BJsonArray FindAll(Func<BJsonValue, bool> predicate)
+        {
+            if (predicate is null)
+                throw new ArgumentNullException(nameof(predicate));
+
+            var matches = new BJsonArray();
+            for (int i = 0; i < _values.Count; i++)
+            {
+                var item = _values[i];
+                if (predicate(item))
+                    matches.Add(item);
+            }
+            return matches;
+        }
+
+        public bool TryFirst(out BJsonValue value)
+        {
+            if (_values.Count > 0)
+            {
+                value = _values[0];
+                return true;
+            }
+
+            value = BJsonValue.Null;
+            return false;
+        }
+
+        public bool TryLast(out BJsonValue value)
+        {
+            if (_values.Count > 0)
+            {
+                value = _values[_values.Count - 1];
+                return true;
+            }
+
+            value = BJsonValue.Null;
+            return false;
+        }
+
+        public bool First(Func<BJsonValue, bool> predicate, out BJsonValue value)
+        {
+            if (predicate is null)
+                throw new ArgumentNullException(nameof(predicate));
+
+            for (int i = 0; i < _values.Count; i++)
+            {
+                var current = _values[i];
+                if (predicate(current))
+                {
+                    value = current;
+                    return true;
+                }
+            }
+
+            value = BJsonValue.Null;
+            return false;
+        }
+
+        public bool Last(Func<BJsonValue, bool> predicate, out BJsonValue value)
+        {
+            if (predicate is null)
+                throw new ArgumentNullException(nameof(predicate));
+
+            for (int i = _values.Count - 1; i >= 0; i--)
+            {
+                var current = _values[i];
+                if (predicate(current))
+                {
+                    value = current;
+                    return true;
+                }
+            }
+
+            value = BJsonValue.Null;
+            return false;
+        }
+
+        public IEnumerable<BJsonValue> Where(Func<BJsonValue, bool> predicate)
+        {
+            if (predicate is null)
+                throw new ArgumentNullException(nameof(predicate));
+
+            for (int i = 0; i < _values.Count; i++)
+            {
+                var item = _values[i];
+                if (predicate(item))
+                    yield return item;
+            }
+        }
+
+        public IEnumerable<TResult> Select<TResult>(Func<BJsonValue, TResult> selector)
+        {
+            if (selector is null)
+                throw new ArgumentNullException(nameof(selector));
+
+            for (int i = 0; i < _values.Count; i++)
+                yield return selector(_values[i]);
+        }
+
+        public BJsonArray Clone() => new(_values);
+
+        public BJsonArray DeepClone(int maxDepth = 256)
+        {
+            if (maxDepth < 0)
+                throw new ArgumentOutOfRangeException(nameof(maxDepth));
+
+            var copy = new BJsonArray(_values.Count);
+            for (int i = 0; i < _values.Count; i++)
+            {
+                copy.Add(_values[i].DeepClone(maxDepth));
+            }
+            return copy;
         }
         
         public bool TryGetSByte(int index, out sbyte value)

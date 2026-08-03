@@ -122,6 +122,55 @@ string prettyJson = BJsonTextWriter.Serialize(value, options);
 BJsonValue parsed = BJson.Parse("{\"id\":42,\"name\":\"alice\"}");
 ```
 
+### Try parse without exceptions
+
+```csharp
+if (BJson.TryParse("{\"id\":42}", out var value))
+{
+    int id = value.ObjectValue["id"].IntValue;
+}
+```
+
+### Transform a DOM tree
+
+```csharp
+var input = BJsonValue.Create(new BJsonObject
+{
+    ["hp"] = 100,
+    ["items"] = new BJsonArray { 1, 2, 3 }
+});
+
+var boosted = BJson.Transform(input, v =>
+{
+    if (v.IsInteger) return BJsonValue.Create(v.IntValue + 10);
+    return v;
+});
+```
+
+### Merge objects with strategy
+
+```csharp
+var baseConfig = new BJsonObject
+{
+    ["meta"] = new BJsonObject { ["version"] = 1, ["stable"] = true }
+};
+
+var patch = new BJsonObject
+{
+    ["meta"] = new BJsonObject { ["version"] = 2, ["name"] = "release" }
+};
+
+baseConfig.Merge(patch, BJsonMergeStrategy.DeepMerge);
+```
+
+### Binary codec helpers
+
+```csharp
+var bytes = new BJsonBinary(new byte[] { 0xDE, 0xAD, 0xBE, 0xEF });
+string base64 = bytes.ToBase64();
+BJsonBinary roundTrip = BJsonBinary.FromBase64(base64);
+```
+
 ## Custom Type Serialization
 
 BinJson supports three main strategies for serializing custom CLR types.
@@ -220,12 +269,25 @@ For a complete guide, see [docs/Extensibility.md](docs/Extensibility.md).
 - `BJson.SerializeToBytes(BJsonValue)`
 - `BJson.SerializeToBytes<T>(T?, BJsonSerializerOptions?)`
 - `BJson.Deserialize(ReadOnlySpan<byte>)`
+- `BJson.TryDeserialize(ReadOnlySpan<byte>, out BJsonValue)`
 - `BJson.Parse(string)`
+- `BJson.TryParse(string, out BJsonValue)`
+- `BJson.TryParse(string, BJsonTextReaderOptions?, out BJsonValue)`
 - `BJson.Parse<T>(string, BJsonSerializerOptions?, BJsonTextReaderOptions?)`
 - `BJson.Stringify(BJsonValue)`
 - `BJson.Stringify<T>(T?, BJsonSerializerOptions?, BJsonTextWriterOptions?)`
+- `BJson.Transform(BJsonValue, Func<BJsonValue, BJsonValue>, int)`
 - `BJsonTextWriter.Serialize(BJsonValue, BJsonTextWriterOptions?)`
 - `BJsonTextReader.Deserialize(string, BJsonTextReaderOptions?)`
+
+## DOM Utility API
+
+In addition to basic add/get operations, the DOM types expose utility APIs for conversion, cloning, query and composition.
+
+- `BJsonValue`: `AsInt`, `AsLong`, `AsDouble`, `DeepClone`, relational operators (`<`, `<=`, `>`, `>=`), implicit/explicit conversions.
+- `BJsonArray`: `Capacity`, `EnsureCapacity`, `TrimExcess`, `GetOrDefault`, typed default getters, `Find*`, `First`, `Last`, `Where`, `Select`, `Clone`, `DeepClone`.
+- `BJsonObject`: `TryAdd`, `AddOrUpdate`, typed default getters, `Merge` with `BJsonMergeStrategy`, `Update`, `RenameKey`, `GetKeysByType`, `Clone`, `DeepClone`.
+- `BJsonBinary`: `ToArray`, `CopyTo`, `ToBase64`/`FromBase64`, `ToHex`/`FromHex`, `FromString`, `DecodeString`.
 
 ## Known Limitations
 

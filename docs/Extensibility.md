@@ -304,3 +304,48 @@ If none is found, it falls back to custom converters, interfaces, and reflection
 - Source generation currently targets attributed classes discovered at compile time.
 - Reference preservation applies to object graphs serialized through the attributed object pipeline.
 - Constructor binding depends on constructor parameter names matching serialized member names.
+
+## DOM Utility APIs
+
+Although this guide focuses on object serialization, recent DOM APIs are useful when building pre- and post-processing pipelines around the serializer.
+
+### Safe parse and deserialize
+
+Use the non-throwing façade methods when ingesting untrusted payloads:
+
+```csharp
+if (BJson.TryParse(jsonText, out var document))
+{
+	// continue processing
+}
+
+if (BJson.TryDeserialize(binaryPayload, out var root))
+{
+	// continue processing
+}
+```
+
+### Recursive transformations
+
+Use `BJson.Transform` to normalize data before typed deserialization:
+
+```csharp
+var normalized = BJson.Transform(input, value =>
+{
+	if (value.IsString && value.StringValue == "N/A")
+		return BJsonValue.Null;
+	return value;
+});
+```
+
+### Merge strategies for configuration layering
+
+`BJsonObject.Merge` supports explicit strategies through `BJsonMergeStrategy`:
+
+- `Overwrite`: incoming values replace existing values.
+- `KeepExisting`: existing values are preserved; only missing keys are added.
+- `DeepMerge`: nested objects are merged recursively.
+
+```csharp
+baseConfig.Merge(environmentConfig, BJsonMergeStrategy.DeepMerge);
+```

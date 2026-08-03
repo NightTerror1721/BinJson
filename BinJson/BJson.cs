@@ -56,6 +56,20 @@ namespace Krampus.BinJson
             return BJsonBinaryReader.Deserialize(data);
         }
 
+        public static bool TryDeserialize(ReadOnlySpan<byte> data, out BJsonValue value)
+        {
+            try
+            {
+                value = BJsonBinaryReader.Deserialize(data);
+                return true;
+            }
+            catch
+            {
+                value = BJsonValue.Null;
+                return false;
+            }
+        }
+
         public static T? Deserialize<T>(ReadOnlySpan<byte> data, BJsonSerializerOptions? options)
         {
             return Deserialize<T>(BJsonBinaryReader.Deserialize(data), options);
@@ -69,12 +83,37 @@ namespace Krampus.BinJson
             return BJsonTextReader.Deserialize(json);
         }
 
+        public static bool TryParse(string json, out BJsonValue value)
+        {
+            return TryParse(json, options: null, out value);
+        }
+
         public static BJsonValue Parse(string json, BJsonTextReaderOptions? options)
         {
             if (json is null)
                 throw new BJsonValidationException("Parameter 'json' cannot be null.");
 
             return BJsonTextReader.Deserialize(json, options);
+        }
+
+        public static bool TryParse(string json, BJsonTextReaderOptions? options, out BJsonValue value)
+        {
+            if (json is null)
+            {
+                value = BJsonValue.Null;
+                return false;
+            }
+
+            try
+            {
+                value = BJsonTextReader.Deserialize(json, options);
+                return true;
+            }
+            catch
+            {
+                value = BJsonValue.Null;
+                return false;
+            }
         }
 
         public static BJsonValue Parse(TextReader reader, bool leaveOpen = false)
@@ -118,6 +157,46 @@ namespace Krampus.BinJson
         public static void Stringify(TextWriter writer, BJsonValue value, bool leaveOpen = false)
         {
             BJsonTextWriter.Serialize(writer, value, options: null, leaveOpen);
+        }
+
+        public static BJsonValue Transform(BJsonValue value, Func<BJsonValue, BJsonValue> transformer, int maxDepth = 256)
+        {
+            if (transformer is null)
+                throw new BJsonValidationException("Parameter 'transformer' cannot be null.");
+            if (maxDepth < 0)
+                throw new BJsonValidationException("Parameter 'maxDepth' cannot be negative.");
+
+            return TransformCore(value, transformer, maxDepth);
+        }
+
+        private static BJsonValue TransformCore(BJsonValue value, Func<BJsonValue, BJsonValue> transformer, int depth)
+        {
+            if (depth <= 0)
+                throw new BJsonValidationException("Maximum transform depth exceeded.");
+
+            var transformed = transformer(value);
+
+            if (transformed.TryGetArray(out var array))
+            {
+                var copy = new BJsonArray(array.Count);
+                for (int i = 0; i < array.Count; i++)
+                {
+                    copy.Add(TransformCore(array[i], transformer, depth - 1));
+                }
+                return BJsonValue.Create(copy);
+            }
+
+            if (transformed.TryGetObject(out var obj))
+            {
+                var copy = new BJsonObject(obj.Count);
+                foreach (var kvp in obj)
+                {
+                    copy.Add(kvp.Key, TransformCore(kvp.Value, transformer, depth - 1));
+                }
+                return BJsonValue.Create(copy);
+            }
+
+            return transformed;
         }
     }
 }

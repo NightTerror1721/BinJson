@@ -121,7 +121,8 @@ namespace Krampus.BinJson.Tests
         {
             var value = BJsonValue.Create(double.NaN);
 
-            Assert.Throws<InvalidOperationException>(() => BJsonTextWriter.Serialize(value));
+            var ex = Assert.Throws<Krampus.BinJson.Error.BJsonSerializationException>(() => BJsonTextWriter.Serialize(value));
+            Assert.Contains("NaN", ex.Message);
         }
 
         [Fact]
@@ -130,7 +131,7 @@ namespace Krampus.BinJson.Tests
             var binary = new BJsonBinary(new byte[] { 1, 2, 3, 4 });
             var value = BJsonValue.Create(binary);
 
-            var ex = Assert.Throws<InvalidOperationException>(() => BJsonTextWriter.Serialize(value));
+            var ex = Assert.Throws<Krampus.BinJson.Error.BJsonSerializationException>(() => BJsonTextWriter.Serialize(value));
             Assert.Contains("Binary values are not allowed", ex.Message);
             Assert.Contains("AllowBinaryAsBase64", ex.Message);
         }
@@ -201,7 +202,8 @@ namespace Krampus.BinJson.Tests
         {
             var value = BJsonValue.Create(double.PositiveInfinity);
 
-            Assert.Throws<InvalidOperationException>(() => BJsonTextWriter.Serialize(value));
+            var ex = Assert.Throws<Krampus.BinJson.Error.BJsonSerializationException>(() => BJsonTextWriter.Serialize(value));
+            Assert.Contains("NaN or Infinity", ex.Message);
         }
 
         [Fact]
@@ -260,7 +262,7 @@ namespace Krampus.BinJson.Tests
         {
             const string json = "// header\n{\"id\":1}";
 
-            Assert.Throws<FormatException>(() => BJsonTextReader.Deserialize(json));
+            Assert.Throws<Krampus.BinJson.Error.BJsonParseException>(() => BJsonTextReader.Deserialize(json));
         }
 
         [Fact]

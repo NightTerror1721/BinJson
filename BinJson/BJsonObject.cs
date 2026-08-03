@@ -1,7 +1,9 @@
 ﻿#nullable enable
 
+using System;
 using System.Collections;
 using System.Collections.Generic;
+using Krampus.BinJson.Error;
 
 namespace Krampus.BinJson
 {
@@ -66,7 +68,12 @@ namespace Krampus.BinJson
 
         public void CopyTo(KeyValuePair<string, BJsonValue>[] array, int arrayIndex) => ((ICollection<KeyValuePair<string, BJsonValue>>)_values).CopyTo(array, arrayIndex);
 
-        public bool Remove(KeyValuePair<string, BJsonValue> item) => _values.Remove(item.Key);
+        public bool Remove(KeyValuePair<string, BJsonValue> item)
+        {
+            if (_values.TryGetValue(item.Key, out var existing) && existing.Equals(item.Value))
+                return _values.Remove(item.Key);
+            return false;
+        }
 
         public IEnumerator<KeyValuePair<string, BJsonValue>> GetEnumerator() => _values.GetEnumerator();
 
@@ -92,6 +99,156 @@ namespace Krampus.BinJson
         public void Add(string key, BJsonObject? value) => _values.Add(key, BJsonValue.Create(value));
         public void Add(string key, BJsonObject? value, bool asCopy) => _values.Add(key, BJsonValue.Create(value, asCopy));
         public void Add(string key, BJsonBinary? value) => _values.Add(key, BJsonValue.Create(value));
+
+        public bool TryAdd(string key, BJsonValue value)
+        {
+            if (_values.ContainsKey(key))
+                return false;
+            _values.Add(key, value);
+            return true;
+        }
+
+        public void AddOrUpdate(string key, BJsonValue value)
+        {
+            _values[key] = value;
+        }
+
+        public BJsonValue GetValueOrDefault(string key, BJsonValue defaultValue = default)
+        {
+            return _values.TryGetValue(key, out var value) ? value : defaultValue;
+        }
+
+        public int GetIntOrDefault(string key, int defaultValue = 0)
+        {
+            return TryGetInt(key, out var value) ? value : defaultValue;
+        }
+
+        public long GetLongOrDefault(string key, long defaultValue = 0)
+        {
+            return TryGetLong(key, out var value) ? value : defaultValue;
+        }
+
+        public double GetDoubleOrDefault(string key, double defaultValue = 0)
+        {
+            return TryGetDouble(key, out var value) ? value : defaultValue;
+        }
+
+        public bool GetBoolOrDefault(string key, bool defaultValue = false)
+        {
+            return TryGetBool(key, out var value) ? value : defaultValue;
+        }
+
+        public string? GetStringOrDefault(string key, string? defaultValue = null)
+        {
+            return TryGetString(key, out var value) ? value : defaultValue;
+        }
+
+        public BJsonObject Clone() => new(_values);
+
+        public BJsonObject DeepClone(int maxDepth = 256)
+        {
+            if (maxDepth < 0)
+                throw new ArgumentOutOfRangeException(nameof(maxDepth));
+
+            var copy = new BJsonObject(_values.Count);
+            foreach (var kvp in _values)
+            {
+                copy.Add(kvp.Key, kvp.Value.DeepClone(maxDepth));
+            }
+            return copy;
+        }
+
+        public void Merge(BJsonObject other, bool overwrite = true)
+        {
+            Merge(other, overwrite ? BJsonMergeStrategy.Overwrite : BJsonMergeStrategy.KeepExisting);
+        }
+
+        public void Merge(BJsonObject other, BJsonMergeStrategy strategy, int maxDepth = 256)
+        {
+            if (other is null)
+                throw new ArgumentNullException(nameof(other));
+            if (maxDepth < 0)
+                throw new ArgumentOutOfRangeException(nameof(maxDepth));
+
+            switch (strategy)
+            {
+                case BJsonMergeStrategy.Overwrite:
+                    foreach (var kvp in other._values)
+                        _values[kvp.Key] = kvp.Value;
+                    return;
+
+                case BJsonMergeStrategy.KeepExisting:
+                    foreach (var kvp in other._values)
+                    {
+                        if (!_values.ContainsKey(kvp.Key))
+                            _values.Add(kvp.Key, kvp.Value);
+                    }
+                    return;
+
+                case BJsonMergeStrategy.DeepMerge:
+                    MergeDeep(other, maxDepth);
+                    return;
+
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(strategy));
+            }
+        }
+
+        private void MergeDeep(BJsonObject other, int depth)
+        {
+            if (depth <= 0)
+                throw new BJsonValidationException("Maximum merge depth exceeded.");
+
+            foreach (var kvp in other._values)
+            {
+                if (_values.TryGetValue(kvp.Key, out var existing)
+                    && existing.TryGetObject(out var existingObj)
+                    && kvp.Value.TryGetObject(out var incomingObj))
+                {
+                    existingObj.Merge(incomingObj, BJsonMergeStrategy.DeepMerge, depth - 1);
+                    continue;
+                }
+
+                _values[kvp.Key] = kvp.Value;
+            }
+        }
+
+        public bool Update(string key, Func<BJsonValue, BJsonValue> updater)
+        {
+            if (updater is null)
+                throw new ArgumentNullException(nameof(updater));
+
+            if (!_values.TryGetValue(key, out var existing))
+                return false;
+
+            _values[key] = updater(existing);
+            return true;
+        }
+
+        public bool RenameKey(string key, string newKey, bool overwrite = false)
+        {
+            if (key == newKey)
+                return _values.ContainsKey(key);
+
+            if (!_values.TryGetValue(key, out var value))
+                return false;
+
+            if (!overwrite && _values.ContainsKey(newKey))
+                return false;
+
+            _values.Remove(key);
+            _values[newKey] = value;
+            return true;
+        }
+
+        public IEnumerable<string> GetKeysByType(BJsonValueType type)
+        {
+            foreach (var kvp in _values)
+            {
+                if (kvp.Value.Type == type)
+                    yield return kvp.Key;
+            }
+        }
 
         public bool TryGetSByte(string key, out sbyte value)
         {

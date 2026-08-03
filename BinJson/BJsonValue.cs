@@ -1,6 +1,8 @@
 ﻿#nullable enable
 
 using System;
+using System.Globalization;
+using System.Text;
 using System.Runtime.CompilerServices;
 using Krampus.BinJson.Error;
 
@@ -399,6 +401,112 @@ namespace Krampus.BinJson
             return false;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public int AsInt()
+        {
+            if (TryGetNumberAsInt(out var value))
+                return value;
+            throw new BJsonValidationException("Value is not a finite numeric value compatible with Int32.");
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public long AsLong()
+        {
+            if (TryGetNumberAsLong(out var value))
+                return value;
+            throw new BJsonValidationException("Value is not a finite numeric value compatible with Int64.");
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public double AsDouble()
+        {
+            if (TryGetNumberAsDouble(out var value))
+                return value;
+            throw new BJsonValidationException("Value is not numeric.");
+        }
+
+        public BJsonValue DeepClone(int maxDepth = 256)
+        {
+            if (maxDepth < 0)
+                throw new BJsonValidationException("Parameter 'maxDepth' cannot be negative.");
+            return DeepCloneCore(this, maxDepth);
+        }
+
+        private static BJsonValue DeepCloneCore(BJsonValue value, int depth)
+        {
+            if (depth <= 0)
+                throw new BJsonValidationException("Maximum clone depth exceeded.");
+
+            if (value.TryGetArray(out var array))
+            {
+                var clone = new BJsonArray(array.Count);
+                for (int i = 0; i < array.Count; i++)
+                    clone.Add(DeepCloneCore(array[i], depth - 1));
+                return Create(clone);
+            }
+
+            if (value.TryGetObject(out var obj))
+            {
+                var clone = new BJsonObject(obj.Count);
+                foreach (var kvp in obj)
+                    clone.Add(kvp.Key, DeepCloneCore(kvp.Value, depth - 1));
+                return Create(clone);
+            }
+
+            if (value.TryGetBinary(out var binary))
+                return Create(new BJsonBinary(binary.AsSpan()));
+
+            return value;
+        }
+
+        public override string ToString()
+        {
+            return Type switch
+            {
+                BJsonValueType.Null => "null",
+                BJsonValueType.Boolean => BoolValue ? "true" : "false",
+                BJsonValueType.Integer => unchecked((long)ULongValue).ToString(CultureInfo.InvariantCulture),
+                BJsonValueType.Float => DoubleValue.ToString("R", CultureInfo.InvariantCulture),
+                BJsonValueType.String => QuoteAndEscape(StringValue),
+                BJsonValueType.Array => $"Array[{ArrayValue.Count}]",
+                BJsonValueType.Object => $"Object{{{ObjectValue.Count}}}",
+                BJsonValueType.Binary => $"Binary[{BinaryValue.Count}]",
+                _ => Type.ToString(),
+            };
+        }
+
+        private static string QuoteAndEscape(string value)
+        {
+            var sb = new StringBuilder(value.Length + 2);
+            sb.Append('"');
+            foreach (char c in value)
+            {
+                switch (c)
+                {
+                    case '"': sb.Append("\\\""); break;
+                    case '\\': sb.Append("\\\\"); break;
+                    case '\b': sb.Append("\\b"); break;
+                    case '\f': sb.Append("\\f"); break;
+                    case '\n': sb.Append("\\n"); break;
+                    case '\r': sb.Append("\\r"); break;
+                    case '\t': sb.Append("\\t"); break;
+                    default:
+                        if (c < ' ')
+                        {
+                            sb.Append("\\u");
+                            sb.Append(((int)c).ToString("x4", CultureInfo.InvariantCulture));
+                        }
+                        else
+                        {
+                            sb.Append(c);
+                        }
+                        break;
+                }
+            }
+            sb.Append('"');
+            return sb.ToString();
+        }
+
         public override bool Equals(object? obj) => obj is BJsonValue other && Equals(other);
 
         public bool Equals(BJsonValue other)
@@ -525,8 +633,44 @@ namespace Krampus.BinJson
         public static BJsonValue Create(BJsonObject? value, bool asCopy) => value is null ? Null : new(TagObject, asCopy ? new BJsonObject(value) : value);
         public static BJsonValue Create(BJsonBinary? value) => value is null ? Null : new(TagBinary, value);
 
+        public static implicit operator BJsonValue(sbyte value) => Create(value);
+        public static implicit operator BJsonValue(short value) => Create(value);
+        public static implicit operator BJsonValue(int value) => Create(value);
+        public static implicit operator BJsonValue(long value) => Create(value);
+        public static implicit operator BJsonValue(byte value) => Create(value);
+        public static implicit operator BJsonValue(ushort value) => Create(value);
+        public static implicit operator BJsonValue(uint value) => Create(value);
+        public static implicit operator BJsonValue(ulong value) => Create(value);
+        public static implicit operator BJsonValue(float value) => Create(value);
+        public static implicit operator BJsonValue(double value) => Create(value);
+        public static implicit operator BJsonValue(bool value) => Create(value);
+        public static implicit operator BJsonValue(string? value) => Create(value);
+        public static implicit operator BJsonValue(BJsonArray? value) => Create(value);
+        public static implicit operator BJsonValue(BJsonObject? value) => Create(value);
+        public static implicit operator BJsonValue(BJsonBinary? value) => Create(value);
+
+        public static explicit operator sbyte(BJsonValue value) => value.SByteValue;
+        public static explicit operator short(BJsonValue value) => value.ShortValue;
+        public static explicit operator int(BJsonValue value) => value.IntValue;
+        public static explicit operator long(BJsonValue value) => value.LongValue;
+        public static explicit operator byte(BJsonValue value) => value.ByteValue;
+        public static explicit operator ushort(BJsonValue value) => value.UShortValue;
+        public static explicit operator uint(BJsonValue value) => value.UIntValue;
+        public static explicit operator ulong(BJsonValue value) => value.ULongValue;
+        public static explicit operator float(BJsonValue value) => value.FloatValue;
+        public static explicit operator double(BJsonValue value) => value.DoubleValue;
+        public static explicit operator bool(BJsonValue value) => value.BoolValue;
+        public static explicit operator string(BJsonValue value) => value.StringValue;
+        public static explicit operator BJsonArray(BJsonValue value) => value.ArrayValue;
+        public static explicit operator BJsonObject(BJsonValue value) => value.ObjectValue;
+        public static explicit operator BJsonBinary(BJsonValue value) => value.BinaryValue;
+
 
         public static bool operator ==(BJsonValue left, BJsonValue right) => left.Equals(right);
         public static bool operator !=(BJsonValue left, BJsonValue right) => !left.Equals(right);
+        public static bool operator <(BJsonValue left, BJsonValue right) => left.CompareTo(right) < 0;
+        public static bool operator >(BJsonValue left, BJsonValue right) => left.CompareTo(right) > 0;
+        public static bool operator <=(BJsonValue left, BJsonValue right) => left.CompareTo(right) <= 0;
+        public static bool operator >=(BJsonValue left, BJsonValue right) => left.CompareTo(right) >= 0;
     }
 }
