@@ -9,7 +9,7 @@ Current status: functional for the DOM, binary serialization v1.0 (final, no leg
 It currently includes:
 - A DOM for null, booleans, integers, floats, strings, arrays, objects, and binary values.
 - Binary serialization in `Krampus.BinJson.Binary`.
-- Official binary wire format v1.0 with fix types, VarUInt lengths/counts, optional header blocks, StringTable/StringRef, and PackedArray support.
+- Official binary wire format v1.0 with fix types, fixed-width string lengths (`String8/16/32`), VarUInt counts/indexes, optional header blocks, StringTable/StringRef, and PackedArray support.
 - JSON text serialization in `Krampus.BinJson.Text` with a **manual parser** (no `System.Text.Json`).
 - Extensible object serialization in `Krampus.BinJson.Serialization`.
 - Pretty-print and advanced configuration options.

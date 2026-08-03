@@ -131,9 +131,11 @@ namespace Krampus.BinJson.Binary
                 case BJsonValueTypeCode.BoolFalse:
                     return BJsonValue.False;
                 case BJsonValueTypeCode.String8:
+                    return BJsonValue.Create(ReadStringData(ReadByte()));
                 case BJsonValueTypeCode.String16:
+                    return BJsonValue.Create(ReadStringData(ReadUInt16()));
                 case BJsonValueTypeCode.String32:
-                    return BJsonValue.Create(ReadStringData());
+                    return BJsonValue.Create(ReadStringData(ReadUInt32AsCount("String length")));
                 case BJsonValueTypeCode.StringRef:
                     return ReadStringReference();
                 case BJsonValueTypeCode.ArrayVar:
@@ -291,10 +293,17 @@ namespace Krampus.BinJson.Binary
             return (int)value;
         }
 
-        private string ReadStringData()
+        private string ReadStringData(int len)
         {
-            int len = ReadVarUIntAsCount("String length");
             return ReadStringBytes(len);
+        }
+
+        private int ReadUInt32AsCount(string context)
+        {
+            uint value = ReadUInt32();
+            if (value > int.MaxValue)
+                throw CreateFormatException($"{context} exceeds Int32.MaxValue.", "UInt32", details: new System.Collections.Generic.Dictionary<string, object?> { ["value"] = value });
+            return (int)value;
         }
 
         private string ReadStringBytes(int byteLength)
@@ -350,8 +359,32 @@ namespace Krampus.BinJson.Binary
 
             for (int i = 0; i < count; i++)
             {
-                int len = ReadVarUIntAsCount("String table entry length");
-                _stringTable.Add(ReadStringBytes(len));
+                _stringTable.Add(ReadStringTableEntry());
+            }
+        }
+
+        private string ReadStringTableEntry()
+        {
+            byte typeCode = ReadByte();
+            if (BJsonBinaryTypeRanges.IsFixStr(typeCode))
+                return ReadStringBytes(typeCode - BJsonBinaryTypeRanges.FixStrMin);
+
+            switch ((BJsonValueTypeCode)typeCode)
+            {
+                case BJsonValueTypeCode.String8:
+                    return ReadStringData(ReadByte());
+                case BJsonValueTypeCode.String16:
+                    return ReadStringData(ReadUInt16());
+                case BJsonValueTypeCode.String32:
+                    return ReadStringData(ReadUInt32AsCount("String table entry length"));
+                default:
+                    throw CreateFormatException(
+                        "Invalid string table entry type code.",
+                        "StringTable",
+                        details: new System.Collections.Generic.Dictionary<string, object?>
+                        {
+                            ["typeCode"] = typeCode
+                        });
             }
         }
 
@@ -390,6 +423,15 @@ namespace Krampus.BinJson.Binary
             int count = ReadVarUIntAsCount("Packed array count");
             var array = new BJsonArray(count);
 
+            if (!IsSupportedPackedElementType(elementType))
+                throw CreateFormatException(
+                    $"Unsupported packed element type code: 0x{elementType:X2}.",
+                    "PackedArray",
+                    details: new System.Collections.Generic.Dictionary<string, object?>
+                    {
+                        ["elementType"] = elementType
+                    });
+
             switch ((BJsonValueTypeCode)elementType)
             {
                 case BJsonValueTypeCode.Null:
@@ -416,6 +458,29 @@ namespace Krampus.BinJson.Binary
             }
 
             return array;
+        }
+
+        private static bool IsSupportedPackedElementType(byte typeCode)
+        {
+            switch ((BJsonValueTypeCode)typeCode)
+            {
+                case BJsonValueTypeCode.Null:
+                case BJsonValueTypeCode.BoolFalse:
+                case BJsonValueTypeCode.BoolTrue:
+                case BJsonValueTypeCode.Int8:
+                case BJsonValueTypeCode.Int16:
+                case BJsonValueTypeCode.Int32:
+                case BJsonValueTypeCode.Int64:
+                case BJsonValueTypeCode.UInt8:
+                case BJsonValueTypeCode.UInt16:
+                case BJsonValueTypeCode.UInt32:
+                case BJsonValueTypeCode.UInt64:
+                case BJsonValueTypeCode.Float32:
+                case BJsonValueTypeCode.Float64:
+                    return true;
+                default:
+                    return false;
+            }
         }
 
         private void ReadPackedBools(BJsonArray array, int count)

@@ -26,9 +26,11 @@ All text is UTF-8 without BOM.
 
 ### Size and Count Encoding
 
-All lengths and counts are encoded as `VarUInt` (LEB128 unsigned variable-length integer).
+Container counts and variable-size payload lengths are encoded as `VarUInt` (LEB128 unsigned variable-length integer).
 
-- `VarUInt` is used only for lengths, counts, and indexes.
+- String value payload lengths for `String8`, `String16`, and `String32` are fixed-width (`u8`, `u16`, `u32` little-endian respectively).
+- Object key lengths are encoded as `VarUInt`.
+- `VarUInt` is used for counts, indexes, and non-string payload lengths.
 - `VarUInt` is not a DOM value type.
 
 ### Canonical Writing
@@ -69,9 +71,9 @@ Writers must produce the smallest encoding by byte size.
 | `0x8D` | VarInt | Reserved scalar tag (not used for DOM values) |
 | `0x8E` | VarUInt | Reserved scalar tag (not used for DOM values) |
 | `0x8F` | Reserved | invalid for current parser |
-| `0xD0` | String8 | `VarUInt length` + UTF-8 bytes |
-| `0xD1` | String16 | `VarUInt length` + UTF-8 bytes |
-| `0xD2` | String32 | `VarUInt length` + UTF-8 bytes |
+| `0xD0` | String8 | `u8 length` + UTF-8 bytes |
+| `0xD1` | String16 | `u16 length` (LE) + UTF-8 bytes |
+| `0xD2` | String32 | `u32 length` (LE) + UTF-8 bytes |
 | `0xD3` | StringRef | `VarUInt index` into StringTable |
 | `0xD4` | ArrayVar | `VarUInt count` + `count` values |
 | `0xD5` | ObjectVar | `VarUInt pairCount` + pairs |
@@ -89,6 +91,9 @@ Writers must produce the smallest encoding by byte size.
 
 - `FixStr`: type byte carries length.
 - `String8/16/32`: current canonical writer selects one of these tags for non-fix lengths based on UTF-8 byte count.
+- `String8`: payload length is 1 byte.
+- `String16`: payload length is 2 bytes little-endian.
+- `String32`: payload length is 4 bytes little-endian.
 
 ### Arrays
 
@@ -126,7 +131,7 @@ The header advertises optional blocks. Blocks are still emitted as explicit tags
 `StringTable` defines interned strings in order:
 
 - `VarUInt count`
-- repeated `count` times: `VarUInt length` + UTF-8 bytes
+- repeated `count` times: canonical string value encoding (`FixStr` or `String8/16/32`)
 
 ### StringRef
 
@@ -147,17 +152,15 @@ The writer emits references only when they reduce total payload size.
 
 - `[PackedArrayTag][ElemTypeCode][VarUInt count][payload]`
 
-Supported element categories are non-composed types:
+Supported element categories are:
 
-- `null`, `bool`, integer scalars, float scalars, `string`, `binary`
+- `null`, `bool`, integer scalars, float scalars
 
 Current payload strategies:
 
 - `null`: count-only (no per-element bytes)
 - `bool`: bit-packed
 - scalar numeric: contiguous fixed-width values
-- `string`: var-length strings or string refs depending on plan
-- `binary`: per-element `VarUInt length` + raw bytes
 
 Packed encoding is used only when it is strictly smaller than regular array encoding.
 

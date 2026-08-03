@@ -230,7 +230,7 @@ namespace Krampus.BinJson.Tests
         }
 
         [Fact]
-        public void Serialize_StringArray_UsesPackedArray()
+        public void Serialize_StringArray_DoesNotUsePackedArray()
         {
             string a = new string('a', 40);
             string b = new string('b', 40);
@@ -243,13 +243,13 @@ namespace Krampus.BinJson.Tests
                 EnablePackedArrays = true,
             });
 
-            Assert.Equal((byte)BJsonValueTypeCode.PackedArray, bytes[0]);
+            Assert.NotEqual((byte)BJsonValueTypeCode.PackedArray, bytes[0]);
             var parsed = BJsonBinaryReader.Deserialize(bytes);
             Assert.Equal(value, parsed);
         }
 
         [Fact]
-        public void Serialize_BinaryArray_UsesPackedArray()
+        public void Serialize_BinaryArray_DoesNotUsePackedArray()
         {
             var value = BJsonValue.Create(new BJsonArray
             {
@@ -264,7 +264,7 @@ namespace Krampus.BinJson.Tests
                 EnablePackedArrays = true,
             });
 
-            Assert.Equal((byte)BJsonValueTypeCode.PackedArray, bytes[0]);
+            Assert.NotEqual((byte)BJsonValueTypeCode.PackedArray, bytes[0]);
             var parsed = BJsonBinaryReader.Deserialize(bytes);
             Assert.Equal(value, parsed);
         }
@@ -299,6 +299,8 @@ namespace Krampus.BinJson.Tests
             });
 
             Assert.Equal((byte)BJsonValueTypeCode.String16, bytes[0]);
+            Assert.Equal(0x00, bytes[1]);
+            Assert.Equal(0x01, bytes[2]);
             var parsed = BJsonBinaryReader.Deserialize(bytes);
             Assert.Equal(value, parsed);
         }
@@ -316,6 +318,10 @@ namespace Krampus.BinJson.Tests
             });
 
             Assert.Equal((byte)BJsonValueTypeCode.String32, bytes[0]);
+            Assert.Equal(0x00, bytes[1]);
+            Assert.Equal(0x00, bytes[2]);
+            Assert.Equal(0x01, bytes[3]);
+            Assert.Equal(0x00, bytes[4]);
             var parsed = BJsonBinaryReader.Deserialize(bytes);
             Assert.Equal(value, parsed);
         }
@@ -332,11 +338,28 @@ namespace Krampus.BinJson.Tests
                 EnablePackedArrays = true,
             });
 
-            Assert.Contains((byte)BJsonValueTypeCode.PackedArray, bytes);
+            Assert.DoesNotContain((byte)BJsonValueTypeCode.PackedArray, bytes);
             Assert.Contains((byte)BJsonValueTypeCode.StringRef, bytes);
 
             var parsed = BJsonBinaryReader.Deserialize(bytes);
             Assert.Equal(value, parsed);
+        }
+
+        [Fact]
+        public void Deserialize_PackedArray_WithStringElementType_Throws()
+        {
+            byte[] payload =
+            {
+                (byte)BJsonValueTypeCode.PackedArray,
+                (byte)BJsonValueTypeCode.String8,
+                0x01,
+                0x01,
+                (byte)'a',
+            };
+
+            using var stream = new MemoryStream(payload);
+            var ex = Assert.Throws<Krampus.BinJson.Error.BJsonBinaryFormatException>(() => BJsonBinaryReader.Deserialize(stream));
+            Assert.Contains("Unsupported packed element type code", ex.Message);
         }
 
         [Fact]
@@ -373,7 +396,7 @@ namespace Krampus.BinJson.Tests
         {
             byte[] payload =
             {
-                (byte)BJsonValueTypeCode.String32,
+                (byte)BJsonValueTypeCode.StringRef,
                 0x80, 0x80, 0x80, 0x80, 0x80,
                 0x80, 0x80, 0x80, 0x80, 0x80,
             };

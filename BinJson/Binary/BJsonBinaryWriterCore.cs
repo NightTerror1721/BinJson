@@ -311,19 +311,6 @@ namespace Krampus.BinJson.Binary
                     return BuildIntegerPackedPlan(array);
                 case BJsonValueType.Float:
                     return PackedPlan.For(BJsonValueTypeCode.Float64);
-                case BJsonValueType.String:
-                    if (_stringTable.Count > 0)
-                    {
-                        for (int i = 0; i < array.Count; i++)
-                        {
-                            if (!_stringTable.ContainsKey(array[i].StringValue))
-                                return PackedPlan.For(BJsonValueTypeCode.String32);
-                        }
-                        return PackedPlan.For(BJsonValueTypeCode.StringRef);
-                    }
-                    return PackedPlan.For(BJsonValueTypeCode.String32);
-                case BJsonValueType.Binary:
-                    return PackedPlan.For(BJsonValueTypeCode.Binary);
                 default:
                     return PackedPlan.None;
             }
@@ -402,15 +389,6 @@ namespace Krampus.BinJson.Binary
                 case BJsonValueTypeCode.Float64:
                     for (int i = 0; i < array.Count; i++) WriteDouble(array[i].DoubleValue);
                     return;
-                case BJsonValueTypeCode.StringRef:
-                    for (int i = 0; i < array.Count; i++) WriteVarUInt((ulong)_stringTable[array[i].StringValue]);
-                    return;
-                case BJsonValueTypeCode.String32:
-                    for (int i = 0; i < array.Count; i++) WriteStringRaw(array[i].StringValue);
-                    return;
-                case BJsonValueTypeCode.Binary:
-                    for (int i = 0; i < array.Count; i++) WriteBinaryRaw(array[i].BinaryValue);
-                    return;
                 default:
                     throw CreateSerializationException("Unsupported packed element type.", "WritePackedPayload");
             }
@@ -433,14 +411,6 @@ namespace Krampus.BinJson.Binary
 
             _stream.Write(data, 0, data.Length);
             _bytesWritten += data.Length;
-        }
-
-        private void WriteStringRaw(string value)
-        {
-            byte[] bytes = Utf8.GetBytes(value);
-            WriteVarUInt((ulong)bytes.Length);
-            _stream.Write(bytes, 0, bytes.Length);
-            _bytesWritten += bytes.Length;
         }
 
         private void WriteBinaryRaw(BJsonBinary value)
@@ -509,18 +479,26 @@ namespace Krampus.BinJson.Binary
             else if (bytes.Length <= byte.MaxValue)
             {
                 WriteTypeCode(BJsonValueTypeCode.String8);
-                WriteVarUInt((ulong)bytes.Length);
+                WriteByte((byte)bytes.Length);
             }
             else if (bytes.Length <= ushort.MaxValue)
             {
                 WriteTypeCode(BJsonValueTypeCode.String16);
-                WriteVarUInt((ulong)bytes.Length);
+                WriteUInt16((ushort)bytes.Length);
             }
             else
             {
                 WriteTypeCode(BJsonValueTypeCode.String32);
-                WriteVarUInt((ulong)bytes.Length);
+                WriteUInt32((uint)bytes.Length);
             }
+            _stream.Write(bytes, 0, bytes.Length);
+            _bytesWritten += bytes.Length;
+        }
+
+        private void WriteString32Payload(string value)
+        {
+            byte[] bytes = Utf8.GetBytes(value);
+            WriteUInt32((uint)bytes.Length);
             _stream.Write(bytes, 0, bytes.Length);
             _bytesWritten += bytes.Length;
         }
@@ -583,7 +561,7 @@ namespace Krampus.BinJson.Binary
 
             for (int i = 0; i < ordered.Length; i++)
             {
-                WriteStringRaw(ordered[i]);
+                WriteStringData(ordered[i]);
             }
         }
 
