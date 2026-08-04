@@ -1,26 +1,27 @@
 #nullable enable
 
 using System;
+using System.Buffers;
 using System.Buffers.Binary;
+using System.Collections.Generic;
 using System.IO;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Text;
 using Krampus.BinJson.Error;
+using Krampus.BinJson.Utilities;
 
 namespace Krampus.BinJson.Binary
 {
     internal sealed class BJsonBinaryReaderCore : IDisposable
     {
-        private static readonly UTF8Encoding Utf8 = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
+        private static readonly UTF8Encoding Utf8 = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
 
-        private readonly Stream _stream;
-        private readonly bool _leaveOpen;
+        private readonly BufferReaderStream _reader;
         private readonly BJsonBinaryReaderOptions _options;
-        private readonly byte[] _singleByteBuffer;
-        private readonly byte[] _numericBuffer;
-        private readonly System.Collections.Generic.List<string> _stringTable;
+        private List<string>? _stringTable;
         private PathSegment[] _pathSegments;
         private int _pathDepth;
-        private long _bytesRead;
 
         public BJsonBinaryReaderCore(Stream stream, bool leaveOpen = false, BJsonBinaryReaderOptions? options = null)
         {
@@ -29,15 +30,11 @@ namespace Krampus.BinJson.Binary
             if (!stream.CanRead)
                 throw new BJsonValidationException("Stream must be readable.");
 
-            _stream = stream;
-            _leaveOpen = leaveOpen;
+            _reader = new BufferReaderStream(stream, leaveOpen);
             _options = options ?? BJsonBinaryReaderOptions.Default;
-            _singleByteBuffer = new byte[1];
-            _numericBuffer = new byte[8];
-            _stringTable = new System.Collections.Generic.List<string>();
+            _stringTable = null;
             _pathSegments = Array.Empty<PathSegment>();
             _pathDepth = 0;
-            _bytesRead = 0;
         }
 
         public BJsonValue Read()
@@ -46,7 +43,17 @@ namespace Krampus.BinJson.Binary
             {
                 return ReadRootValue();
             }
-            catch (Exception ex) when (!(ex is BJsonException))
+            catch (EndOfStreamException ex)
+            {
+                var details = new Dictionary<string, object?>(StringComparer.Ordinal);
+                if (ex.Data.Contains("expectedBytes"))
+                    details["expectedBytes"] = ex.Data["expectedBytes"];
+                if (ex.Data.Contains("actualBytes"))
+                    details["actualBytes"] = ex.Data["actualBytes"];
+
+                throw CreateFormatException("Unexpected end of stream.", "ReadExactly", ex, details.Count > 0 ? details : null);
+            }
+            catch (Exception ex) when (ex is not BJsonException)
             {
                 throw CreateFormatException("Failed to deserialize binary BinJson payload.", "Root", ex);
             }
@@ -54,15 +61,14 @@ namespace Krampus.BinJson.Binary
 
         public void Dispose()
         {
-            if (!_leaveOpen)
-                _stream.Dispose();
+            _reader.Dispose();
         }
 
         private BJsonValue ReadRootValue()
         {
             while (true)
             {
-                byte typeCode = ReadByte();
+                byte typeCode = _reader.ReadByte();
                 if (typeCode == (byte)BJsonValueTypeCode.HeaderMarker)
                 {
                     ReadHeader();
@@ -83,9 +89,10 @@ namespace Krampus.BinJson.Binary
             }
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private BJsonValue ReadValue()
         {
-            return ReadValueFromTypeCode(ReadByte());
+            return ReadValueFromTypeCode(_reader.ReadByte());
         }
 
         private BJsonValue ReadValueFromTypeCode(byte typeCode)
@@ -94,7 +101,7 @@ namespace Krampus.BinJson.Binary
                 return BJsonValue.Create((ulong)typeCode);
 
             if (BJsonBinaryTypeRanges.IsFixStr(typeCode))
-                return BJsonValue.Create(ReadStringBytes(typeCode - BJsonBinaryTypeRanges.FixStrMin));
+                return BJsonValue.Create(ReadStringData(typeCode - BJsonBinaryTypeRanges.FixStrMin));
 
             if (BJsonBinaryTypeRanges.IsFixArray(typeCode))
                 return BJsonValue.Create(ReadArray(typeCode & 0x0F));
@@ -102,59 +109,34 @@ namespace Krampus.BinJson.Binary
             if (BJsonBinaryTypeRanges.IsFixObject(typeCode))
                 return BJsonValue.Create(ReadObject(typeCode & 0x0F));
 
-            switch ((BJsonValueTypeCode)typeCode)
+            return (BJsonValueTypeCode)typeCode switch
             {
-                case BJsonValueTypeCode.Null:
-                    return BJsonValue.Null;
-                case BJsonValueTypeCode.Int8:
-                    return BJsonValue.Create(unchecked((sbyte)ReadByte()));
-                case BJsonValueTypeCode.Int16:
-                    return BJsonValue.Create(ReadInt16());
-                case BJsonValueTypeCode.Int32:
-                    return BJsonValue.Create(ReadInt32());
-                case BJsonValueTypeCode.Int64:
-                    return BJsonValue.Create(ReadInt64());
-                case BJsonValueTypeCode.UInt8:
-                    return BJsonValue.Create(ReadByte());
-                case BJsonValueTypeCode.UInt16:
-                    return BJsonValue.Create(ReadUInt16());
-                case BJsonValueTypeCode.UInt32:
-                    return BJsonValue.Create(ReadUInt32());
-                case BJsonValueTypeCode.UInt64:
-                    return BJsonValue.Create(ReadUInt64());
-                case BJsonValueTypeCode.Float32:
-                    return BJsonValue.Create(ReadSingle());
-                case BJsonValueTypeCode.Float64:
-                    return BJsonValue.Create(ReadDouble());
-                case BJsonValueTypeCode.BoolTrue:
-                    return BJsonValue.True;
-                case BJsonValueTypeCode.BoolFalse:
-                    return BJsonValue.False;
-                case BJsonValueTypeCode.String8:
-                    return BJsonValue.Create(ReadStringData(ReadByte()));
-                case BJsonValueTypeCode.String16:
-                    return BJsonValue.Create(ReadStringData(ReadUInt16()));
-                case BJsonValueTypeCode.String32:
-                    return BJsonValue.Create(ReadStringData(ReadUInt32AsCount("String length")));
-                case BJsonValueTypeCode.StringRef:
-                    return ReadStringReference();
-                case BJsonValueTypeCode.ArrayVar:
-                    return BJsonValue.Create(ReadArray(ReadVarUIntAsCount("Array element count")));
-                case BJsonValueTypeCode.ObjectVar:
-                    return BJsonValue.Create(ReadObject(ReadVarUIntAsCount("Object pair count")));
-                case BJsonValueTypeCode.PackedArray:
-                    return BJsonValue.Create(ReadPackedArray());
-                case BJsonValueTypeCode.Binary:
-                    return BJsonValue.Create(ReadBinary());
-                default:
-                    throw CreateFormatException(
-                        $"Invalid BJson type code: 0x{(byte)typeCode:X2}",
-                        "TypeCode",
-                        details: new System.Collections.Generic.Dictionary<string, object?>
-                        {
-                            ["typeCode"] = (byte)typeCode
-                        });
-            }
+                BJsonValueTypeCode.Null => BJsonValue.Null,
+                BJsonValueTypeCode.Int8 => BJsonValue.Create(unchecked((sbyte)_reader.ReadByte())),
+                BJsonValueTypeCode.Int16 => BJsonValue.Create(_reader.ReadInt16LE()),
+                BJsonValueTypeCode.Int32 => BJsonValue.Create(_reader.ReadInt32LE()),
+                BJsonValueTypeCode.Int64 => BJsonValue.Create(_reader.ReadInt64LE()),
+                BJsonValueTypeCode.UInt8 => BJsonValue.Create(_reader.ReadByte()),
+                BJsonValueTypeCode.UInt16 => BJsonValue.Create(_reader.ReadUInt16LE()),
+                BJsonValueTypeCode.UInt32 => BJsonValue.Create(_reader.ReadUInt32LE()),
+                BJsonValueTypeCode.UInt64 => BJsonValue.Create(_reader.ReadUInt64LE()),
+                BJsonValueTypeCode.Float32 => BJsonValue.Create(_reader.ReadSingleLE()),
+                BJsonValueTypeCode.Float64 => BJsonValue.Create(_reader.ReadDoubleLE()),
+                BJsonValueTypeCode.BoolTrue => BJsonValue.True,
+                BJsonValueTypeCode.BoolFalse => BJsonValue.False,
+                BJsonValueTypeCode.String8 => BJsonValue.Create(ReadStringData(_reader.ReadByte())),
+                BJsonValueTypeCode.String16 => BJsonValue.Create(ReadStringData(_reader.ReadUInt16LE())),
+                BJsonValueTypeCode.String32 => BJsonValue.Create(ReadStringData(ReadUInt32AsCount("String length"))),
+                BJsonValueTypeCode.StringRef => ReadStringReference(),
+                BJsonValueTypeCode.ArrayVar => BJsonValue.Create(ReadArray(ReadVarUIntAsCount("Array element count"))),
+                BJsonValueTypeCode.ObjectVar => BJsonValue.Create(ReadObject(ReadVarUIntAsCount("Object pair count"))),
+                BJsonValueTypeCode.PackedArray => BJsonValue.Create(ReadPackedArray()),
+                BJsonValueTypeCode.Binary => BJsonValue.Create(ReadBinary()),
+                _ => throw CreateFormatException(
+                                        $"Invalid BJson type code: 0x{typeCode:X2}",
+                                        "TypeCode",
+                                        details: new Dictionary<string, object?> { ["typeCode"] = typeCode }),
+            };
         }
 
         private BJsonArray ReadArray(int count)
@@ -188,10 +170,7 @@ namespace Krampus.BinJson.Binary
                     throw CreateFormatException(
                         $"Duplicate object key '{key}' is not allowed.",
                         "Object",
-                        details: new System.Collections.Generic.Dictionary<string, object?>
-                        {
-                            ["key"] = key
-                        });
+                        details: new Dictionary<string, object?> { ["key"] = key });
 
                 PushPropertyPathSegment(key);
                 try
@@ -207,111 +186,32 @@ namespace Krampus.BinJson.Binary
             return obj;
         }
 
-        private byte ReadByte()
-        {
-            int read = _stream.Read(_singleByteBuffer, 0, 1);
-            if (read != 1)
-                throw CreateFormatException("Unexpected end of stream while reading byte.", "ReadByte");
-            _bytesRead += 1;
-            return _singleByteBuffer[0];
-        }
-
-        private short ReadInt16()
-        {
-            FillBuffer(_numericBuffer, sizeof(short));
-            return BinaryPrimitives.ReadInt16LittleEndian(_numericBuffer.AsSpan(0, sizeof(short)));
-        }
-
-        private ushort ReadUInt16()
-        {
-            FillBuffer(_numericBuffer, sizeof(ushort));
-            return BinaryPrimitives.ReadUInt16LittleEndian(_numericBuffer.AsSpan(0, sizeof(ushort)));
-        }
-
-        private int ReadInt32()
-        {
-            FillBuffer(_numericBuffer, sizeof(int));
-            return BinaryPrimitives.ReadInt32LittleEndian(_numericBuffer.AsSpan(0, sizeof(int)));
-        }
-
-        private uint ReadUInt32()
-        {
-            FillBuffer(_numericBuffer, sizeof(uint));
-            return BinaryPrimitives.ReadUInt32LittleEndian(_numericBuffer.AsSpan(0, sizeof(uint)));
-        }
-
-        private long ReadInt64()
-        {
-            FillBuffer(_numericBuffer, sizeof(long));
-            return BinaryPrimitives.ReadInt64LittleEndian(_numericBuffer.AsSpan(0, sizeof(long)));
-        }
-
-        private ulong ReadUInt64()
-        {
-            FillBuffer(_numericBuffer, sizeof(ulong));
-            return BinaryPrimitives.ReadUInt64LittleEndian(_numericBuffer.AsSpan(0, sizeof(ulong)));
-        }
-
-        private float ReadSingle()
-        {
-            FillBuffer(_numericBuffer, sizeof(int));
-            int bits = BinaryPrimitives.ReadInt32LittleEndian(_numericBuffer.AsSpan(0, sizeof(int)));
-            return BitConverter.Int32BitsToSingle(bits);
-        }
-
-        private double ReadDouble()
-        {
-            FillBuffer(_numericBuffer, sizeof(long));
-            long bits = BinaryPrimitives.ReadInt64LittleEndian(_numericBuffer.AsSpan(0, sizeof(long)));
-            return BitConverter.Int64BitsToDouble(bits);
-        }
-
-        private ulong ReadVarUInt()
-        {
-            ulong value = 0;
-            int shift = 0;
-
-            for (int i = 0; i < 10; i++)
-            {
-                byte b = ReadByte();
-                value |= (ulong)(b & 0x7F) << shift;
-
-                if ((b & 0x80) == 0)
-                    return value;
-
-                shift += 7;
-            }
-
-            throw CreateFormatException("Invalid VarUInt encoding.", "VarUInt");
-        }
-
         private int ReadVarUIntAsCount(string context)
         {
-            ulong value = ReadVarUInt();
+            if (!_reader.ReadVarUInt(out var value))
+                throw CreateFormatException("Invalid VarUInt encoding.", "VarUInt", details: new Dictionary<string, object?> { ["context"] = context });
             if (value > int.MaxValue)
-                throw CreateFormatException($"{context} exceeds Int32.MaxValue.", "VarUInt", details: new System.Collections.Generic.Dictionary<string, object?> { ["value"] = value });
+                throw CreateFormatException($"{context} exceeds Int32.MaxValue.", "VarUInt", details: new Dictionary<string, object?> { ["value"] = value });
             return (int)value;
-        }
-
-        private string ReadStringData(int len)
-        {
-            return ReadStringBytes(len);
         }
 
         private int ReadUInt32AsCount(string context)
         {
-            uint value = ReadUInt32();
+            uint value = _reader.ReadUInt32LE();
             if (value > int.MaxValue)
-                throw CreateFormatException($"{context} exceeds Int32.MaxValue.", "UInt32", details: new System.Collections.Generic.Dictionary<string, object?> { ["value"] = value });
+                throw CreateFormatException($"{context} exceeds Int32.MaxValue.", "UInt32", details: new Dictionary<string, object?> { ["value"] = value });
             return (int)value;
         }
 
-        private string ReadStringBytes(int byteLength)
+        private string ReadStringData(int byteLength)
         {
-            byte[] bytes = ReadBytes(byteLength);
+            if (byteLength == 0)
+                return string.Empty;
+
             try
             {
-                return Utf8.GetString(bytes);
+                using var rented = _reader.ReadRentedBuffer(byteLength);
+                return Utf8.GetString(rented);
             }
             catch (DecoderFallbackException ex)
             {
@@ -322,8 +222,11 @@ namespace Krampus.BinJson.Binary
         private BJsonBinary ReadBinary()
         {
             int len = ReadVarUIntAsCount("Binary length");
-            byte[] bytes = ReadBytes(len);
-            return new BJsonBinary(bytes);
+            if (len == 0)
+                return new BJsonBinary(Array.Empty<byte>());
+
+            using var rented = _reader.ReadRentedBuffer(len);
+            return new BJsonBinary(rented.ToArray());
         }
 
         private string ReadObjectKey()
@@ -333,70 +236,70 @@ namespace Krampus.BinJson.Binary
                 throw CreateFormatException(
                     "Invalid object key encoding. Expected string value.",
                     "ObjectKey",
-                    details: new System.Collections.Generic.Dictionary<string, object?>
-                    {
-                        ["actualType"] = keyValue.Type.ToString()
-                    });
+                    details: new Dictionary<string, object?> { ["actualType"] = keyValue.Type.ToString() });
 
             return keyValue.StringValue;
         }
 
         private void ReadHeader()
         {
-            byte magic0 = ReadByte();
-            byte magic1 = ReadByte();
-            byte version = ReadByte();
-            byte flags = ReadByte();
+            byte magic0 = _reader.ReadByte();
+            byte magic1 = _reader.ReadByte();
+            byte version = _reader.ReadByte();
+            byte flags = _reader.ReadByte();
 
             if (magic0 != (byte)'B' || magic1 != (byte)'J')
                 throw CreateFormatException("Invalid binary header magic.", "Header");
             if (version != 0x01)
-                throw CreateFormatException($"Unsupported binary version: {version}.", "Header", details: new System.Collections.Generic.Dictionary<string, object?> { ["version"] = version });
+                throw CreateFormatException($"Unsupported binary version: {version}.", "Header", details: new Dictionary<string, object?> { ["version"] = version });
             if ((flags & 0xFC) != 0)
-                throw CreateFormatException("Unsupported header flags.", "Header", details: new System.Collections.Generic.Dictionary<string, object?> { ["flags"] = flags });
+                throw CreateFormatException("Unsupported header flags.", "Header", details: new Dictionary<string, object?> { ["flags"] = flags });
         }
 
         private void ReadStringTable()
         {
             int count = ReadVarUIntAsCount("String table count");
-            _stringTable.Clear();
-            _stringTable.Capacity = Math.Max(_stringTable.Capacity, count);
+            if (count <= 0)
+            {
+                _stringTable?.Clear();
+                _stringTable = null;
+                return;
+            }
+
+            if (_stringTable is null)
+                _stringTable = new List<string>(count);
+            else
+            {
+                _stringTable.Clear();
+                _stringTable.Capacity = Math.Max(_stringTable.Capacity, count);
+            }
 
             for (int i = 0; i < count; i++)
-            {
                 _stringTable.Add(ReadStringTableEntry());
-            }
         }
 
         private string ReadStringTableEntry()
         {
-            byte typeCode = ReadByte();
+            byte typeCode = _reader.ReadByte();
             if (BJsonBinaryTypeRanges.IsFixStr(typeCode))
-                return ReadStringBytes(typeCode - BJsonBinaryTypeRanges.FixStrMin);
+                return ReadStringData(typeCode - BJsonBinaryTypeRanges.FixStrMin);
 
-            switch ((BJsonValueTypeCode)typeCode)
+            return (BJsonValueTypeCode)typeCode switch
             {
-                case BJsonValueTypeCode.String8:
-                    return ReadStringData(ReadByte());
-                case BJsonValueTypeCode.String16:
-                    return ReadStringData(ReadUInt16());
-                case BJsonValueTypeCode.String32:
-                    return ReadStringData(ReadUInt32AsCount("String table entry length"));
-                default:
-                    throw CreateFormatException(
-                        "Invalid string table entry type code.",
-                        "StringTable",
-                        details: new System.Collections.Generic.Dictionary<string, object?>
-                        {
-                            ["typeCode"] = typeCode
-                        });
-            }
+                BJsonValueTypeCode.String8 => ReadStringData(_reader.ReadByte()),
+                BJsonValueTypeCode.String16 => ReadStringData(_reader.ReadUInt16LE()),
+                BJsonValueTypeCode.String32 => ReadStringData(ReadUInt32AsCount("String table entry length")),
+                _ => throw CreateFormatException(
+                                        "Invalid string table entry type code.",
+                                        "StringTable",
+                                        details: new Dictionary<string, object?> { ["typeCode"] = typeCode }),
+            };
         }
 
         private BJsonValue ReadStringReference()
         {
             int index = ReadVarUIntAsCount("StringRef index");
-            if ((uint)index < (uint)_stringTable.Count)
+            if (_stringTable is not null && (uint)index < (uint)_stringTable.Count)
                 return BJsonValue.Create(_stringTable[index]);
 
             if (_options.InvalidStringRefPolicy == BJsonInvalidStringRefPolicy.CoerceNull)
@@ -405,26 +308,24 @@ namespace Krampus.BinJson.Binary
             throw CreateFormatException(
                 $"Invalid StringRef index {index}.",
                 "StringRef",
-                details: new System.Collections.Generic.Dictionary<string, object?>
+                details: new Dictionary<string, object?>
                 {
                     ["index"] = index,
-                    ["stringTableCount"] = _stringTable.Count
+                    ["stringTableCount"] = _stringTable?.Count ?? 0
                 });
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private void SkipExtContainer()
         {
             int len = ReadVarUIntAsCount("ExtContainer length");
-            if (len == 0)
-                return;
-
-            byte[] skipped = ReadBytes(len);
-            _ = skipped;
+            if (len > 0)
+                _reader.Skip(len);
         }
 
         private BJsonArray ReadPackedArray()
         {
-            byte elementType = ReadByte();
+            byte elementType = _reader.ReadByte();
             int count = ReadVarUIntAsCount("Packed array count");
             var array = new BJsonArray(count);
 
@@ -432,34 +333,179 @@ namespace Krampus.BinJson.Binary
                 throw CreateFormatException(
                     $"Unsupported packed element type code: 0x{elementType:X2}.",
                     "PackedArray",
-                    details: new System.Collections.Generic.Dictionary<string, object?>
-                    {
-                        ["elementType"] = elementType
-                    });
+                    details: new Dictionary<string, object?> { ["elementType"] = elementType });
 
             switch ((BJsonValueTypeCode)elementType)
             {
                 case BJsonValueTypeCode.Null:
                     for (int i = 0; i < count; i++) array.Add(BJsonValue.Null);
                     break;
+
                 case BJsonValueTypeCode.BoolFalse:
                 case BJsonValueTypeCode.BoolTrue:
                     ReadPackedBools(array, count);
                     break;
+
                 default:
-                    for (int i = 0; i < count; i++)
+                {
+                    if (!BJsonBinaryTypeSizes.IsFixedSize(elementType))
                     {
-                        PushIndexPathSegment(i);
-                        try
+                        throw CreateFormatException(
+                            $"Packed element type code 0x{elementType:X2} is not fixed-size.",
+                            "PackedArray",
+                            details: new Dictionary<string, object?> {
+                                ["elementType"] = elementType
+                            }
+                        );
+                    }
+
+                    int elementSize = BJsonBinaryTypeSizes.GetSize(elementType);
+                    using var rented = _reader.ReadRentedBuffer(count * elementSize);
+                    var span = rented.Span;
+
+                    switch ((BJsonValueTypeCode)elementType)
+                    {
+                        case BJsonValueTypeCode.Int8:
+                            for (int i = 0; i < count; i++)
+                                array.Add(BJsonValue.Create((sbyte)span[i]));
+                            break;
+
+                        case BJsonValueTypeCode.UInt8:
+                            for (int i = 0; i < count; i++)
+                                array.Add(BJsonValue.Create(span[i]));
+                            break;
+
+                        case BJsonValueTypeCode.Int16:
                         {
-                            array.Add(ReadValueFromTypeCode(elementType));
+                            var typedSpan = MemoryMarshal.Cast<byte, short>(span);
+                            if (BitConverter.IsLittleEndian)
+                            {
+                                for (int i = 0; i < count; i++)
+                                    array.Add(BJsonValue.Create(typedSpan[i]));
+                            }
+                            else
+                            {
+                                for (int i = 0; i < count; i++)
+                                    array.Add(BJsonValue.Create(BinaryPrimitives.ReverseEndianness(typedSpan[i])));
+                            }
+                            break;
                         }
-                        finally
+
+                        case BJsonValueTypeCode.UInt16:
                         {
-                            PopPathSegment();
+                            var typedSpan = MemoryMarshal.Cast<byte, ushort>(span);
+                            if (BitConverter.IsLittleEndian)
+                            {
+                                for (int i = 0; i < count; i++)
+                                    array.Add(BJsonValue.Create(typedSpan[i]));
+                            }
+                            else
+                            {
+                                for (int i = 0; i < count; i++)
+                                    array.Add(BJsonValue.Create(BinaryPrimitives.ReverseEndianness(typedSpan[i])));
+                            }
+                            break;
+                        }
+
+                        case BJsonValueTypeCode.Int32:
+                        {
+                            var typedSpan = MemoryMarshal.Cast<byte, int>(span);
+                            if (BitConverter.IsLittleEndian)
+                            {
+                                for (int i = 0; i < count; i++)
+                                    array.Add(BJsonValue.Create(typedSpan[i]));
+                            }
+                            else
+                            {
+                                for (int i = 0; i < count; i++)
+                                    array.Add(BJsonValue.Create(BinaryPrimitives.ReverseEndianness(typedSpan[i])));
+                            }
+                            break;
+                        }
+
+                        case BJsonValueTypeCode.UInt32:
+                        {
+                            var typedSpan = MemoryMarshal.Cast<byte, uint>(span);
+                            if (BitConverter.IsLittleEndian)
+                            {
+                                for (int i = 0; i < count; i++)
+                                    array.Add(BJsonValue.Create(typedSpan[i]));
+                            }
+                            else
+                            {
+                                for (int i = 0; i < count; i++)
+                                    array.Add(BJsonValue.Create(BinaryPrimitives.ReverseEndianness(typedSpan[i])));
+                            }
+                            break;
+                        }
+
+                        case BJsonValueTypeCode.Int64:
+                        {
+                            var typedSpan = MemoryMarshal.Cast<byte, long>(span);
+                            if (BitConverter.IsLittleEndian)
+                            {
+                                for (int i = 0; i < count; i++)
+                                    array.Add(BJsonValue.Create(typedSpan[i]));
+                            }
+                            else
+                            {
+                                for (int i = 0; i < count; i++)
+                                    array.Add(BJsonValue.Create(BinaryPrimitives.ReverseEndianness(typedSpan[i])));
+                            }
+                            break;
+                        }
+
+                        case BJsonValueTypeCode.UInt64:
+                        {
+                            var typedSpan = MemoryMarshal.Cast<byte, ulong>(span);
+                            if (BitConverter.IsLittleEndian)
+                            {
+                                for (int i = 0; i < count; i++)
+                                    array.Add(BJsonValue.Create(typedSpan[i]));
+                            }
+                            else
+                            {
+                                for (int i = 0; i < count; i++)
+                                    array.Add(BJsonValue.Create(BinaryPrimitives.ReverseEndianness(typedSpan[i])));
+                            }
+                            break;
+                        }
+
+                        case BJsonValueTypeCode.Float32:
+                        {
+                            var typedSpan = MemoryMarshal.Cast<byte, uint>(span);
+                            if (BitConverter.IsLittleEndian)
+                            {
+                                for (int i = 0; i < count; i++)
+                                    array.Add(BJsonValue.Create(BitConverter.Int32BitsToSingle((int)typedSpan[i])));
+                            }
+                            else
+                            {
+                                for (int i = 0; i < count; i++)
+                                    array.Add(BJsonValue.Create(BitConverter.Int32BitsToSingle((int)BinaryPrimitives.ReverseEndianness(typedSpan[i]))));
+                            }
+                            break;
+                        }
+
+                        case BJsonValueTypeCode.Float64:
+                        {
+                            var doubleSpan = MemoryMarshal.Cast<byte, ulong>(span);
+                            if (BitConverter.IsLittleEndian)
+                            {
+                                for (int i = 0; i < count; i++)
+                                    array.Add(BJsonValue.Create(BitConverter.Int64BitsToDouble((long)doubleSpan[i])));
+                            }
+                            else
+                            {
+                                for (int i = 0; i < count; i++)
+                                    array.Add(BJsonValue.Create(BitConverter.Int64BitsToDouble((long)BinaryPrimitives.ReverseEndianness(doubleSpan[i]))));
+                            }
+                            break;
                         }
                     }
+
                     break;
+                }
             }
 
             return array;
@@ -467,71 +513,36 @@ namespace Krampus.BinJson.Binary
 
         private static bool IsSupportedPackedElementType(byte typeCode)
         {
-            switch ((BJsonValueTypeCode)typeCode)
+            return (BJsonValueTypeCode)typeCode switch
             {
-                case BJsonValueTypeCode.Null:
-                case BJsonValueTypeCode.BoolFalse:
-                case BJsonValueTypeCode.BoolTrue:
-                case BJsonValueTypeCode.Int8:
-                case BJsonValueTypeCode.Int16:
-                case BJsonValueTypeCode.Int32:
-                case BJsonValueTypeCode.Int64:
-                case BJsonValueTypeCode.UInt8:
-                case BJsonValueTypeCode.UInt16:
-                case BJsonValueTypeCode.UInt32:
-                case BJsonValueTypeCode.UInt64:
-                case BJsonValueTypeCode.Float32:
-                case BJsonValueTypeCode.Float64:
-                    return true;
-                default:
-                    return false;
-            }
+                BJsonValueTypeCode.Null or
+                BJsonValueTypeCode.BoolFalse or
+                BJsonValueTypeCode.BoolTrue or
+                BJsonValueTypeCode.Int8 or
+                BJsonValueTypeCode.Int16 or
+                BJsonValueTypeCode.Int32 or
+                BJsonValueTypeCode.Int64 or
+                BJsonValueTypeCode.UInt8 or
+                BJsonValueTypeCode.UInt16 or
+                BJsonValueTypeCode.UInt32 or
+                BJsonValueTypeCode.UInt64 or
+                BJsonValueTypeCode.Float32 or
+                BJsonValueTypeCode.Float64 => true,
+                _ => false,
+            };
         }
 
         private void ReadPackedBools(BJsonArray array, int count)
         {
             int byteCount = (count + 7) / 8;
-            byte[] packed = ReadBytes(byteCount);
+            using var packedRented = _reader.ReadRentedBuffer(byteCount);
 
             for (int i = 0; i < count; i++)
             {
                 int byteIndex = i / 8;
                 int bitIndex = i % 8;
-                bool bit = (packed[byteIndex] & (1 << bitIndex)) != 0;
+                bool bit = (packedRented[byteIndex] & (1 << bitIndex)) != 0;
                 array.Add(bit ? BJsonValue.True : BJsonValue.False);
-            }
-        }
-
-        private byte[] ReadBytes(int length)
-        {
-            if (length < 0)
-                throw CreateFormatException("Negative length is not allowed.", "ReadBytes");
-            if (length == 0)
-                return Array.Empty<byte>();
-
-            byte[] buffer = new byte[length];
-            FillBuffer(buffer, length);
-            return buffer;
-        }
-
-        private void FillBuffer(byte[] buffer, int length)
-        {
-            int totalRead = 0;
-            while (totalRead < length)
-            {
-                int bytesRead = _stream.Read(buffer, totalRead, length - totalRead);
-                if (bytesRead == 0)
-                    throw CreateFormatException(
-                        "Unexpected end of stream.",
-                        "ReadExactly",
-                        details: new System.Collections.Generic.Dictionary<string, object?>
-                        {
-                            ["expectedBytes"] = length,
-                            ["actualBytes"] = totalRead
-                        });
-
-                totalRead += bytesRead;
-                _bytesRead += bytesRead;
             }
         }
 
@@ -594,18 +605,19 @@ namespace Krampus.BinJson.Binary
             string message,
             string? operation,
             Exception? innerException = null,
-            System.Collections.Generic.IDictionary<string, object?>? details = null)
+            IDictionary<string, object?>? details = null)
         {
             var map = details is null
-                ? new System.Collections.Generic.Dictionary<string, object?>(StringComparer.Ordinal)
-                : new System.Collections.Generic.Dictionary<string, object?>(details, StringComparer.Ordinal);
+                ? new Dictionary<string, object?>(StringComparer.Ordinal)
+                : new Dictionary<string, object?>(details, StringComparer.Ordinal);
 
-            map["byteOffset"] = _bytesRead;
+            long currentOffset = _reader.BytesRead;
+            map["byteOffset"] = currentOffset;
             map["path"] = BuildCurrentPath();
 
             return new BJsonBinaryFormatException(
                 message,
-                byteOffset: _bytesRead,
+                byteOffset: currentOffset,
                 section: operation,
                 documentPath: BuildCurrentPath(),
                 errorCode: BJsonErrorCode.BinaryFormatError,

@@ -1,48 +1,46 @@
 #nullable enable
 
 using System;
+using System.Buffers;
 using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.IO;
+using System.Runtime.CompilerServices;
 using System.Text;
 using Krampus.BinJson.Error;
+using Krampus.BinJson.Utilities;
 
 namespace Krampus.BinJson.Binary
 {
     internal sealed class BJsonBinaryWriterCore : IDisposable
     {
-        private static readonly UTF8Encoding Utf8 = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
+        private static readonly UTF8Encoding Utf8 = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
 
-        private readonly Stream _stream;
-        private readonly bool _leaveOpen;
+        private readonly BufferWriterStream _writer;
         private readonly BJsonBinaryWriterOptions _options;
-        private readonly byte[] _singleByteBuffer;
-        private readonly byte[] _numericBuffer;
+
         private readonly Dictionary<string, int> _stringTable;
         private readonly Dictionary<string, int> _stringFrequencies;
         private bool _stringTablePrepared;
+
         private PathSegment[] _pathSegments;
         private int _pathDepth;
-        private long _bytesWritten;
 
-        public BJsonBinaryWriterCore(Stream stream, bool leaveOpen = false, BJsonBinaryWriterOptions? options = null)
+        public BJsonBinaryWriterCore(Stream stream, bool leaveOpen = false, BJsonBinaryWriterOptions? options = null, int bufferSize = 8192)
         {
             if (stream is null)
                 throw new BJsonValidationException("Parameter 'stream' cannot be null.");
             if (!stream.CanWrite)
                 throw new BJsonValidationException("Stream must be writable.");
 
-            _stream = stream;
-            _leaveOpen = leaveOpen;
+            _writer = new BufferWriterStream(stream, leaveOpen);
             _options = options ?? BJsonBinaryWriterOptions.Default;
-            _singleByteBuffer = new byte[1];
-            _numericBuffer = new byte[8];
+
             _stringTable = new Dictionary<string, int>(StringComparer.Ordinal);
             _stringFrequencies = new Dictionary<string, int>(StringComparer.Ordinal);
             _stringTablePrepared = false;
             _pathSegments = Array.Empty<PathSegment>();
             _pathDepth = 0;
-            _bytesWritten = 0;
         }
 
         public void Write(BJsonValue value)
@@ -62,7 +60,7 @@ namespace Krampus.BinJson.Binary
         {
             try
             {
-                _stream.Flush();
+                _writer.Flush();
             }
             catch (Exception ex) when (ex is not BJsonException)
             {
@@ -72,8 +70,7 @@ namespace Krampus.BinJson.Binary
 
         public void Dispose()
         {
-            if (!_leaveOpen)
-                _stream.Dispose();
+            _writer.Dispose();
         }
 
         private void PrepareStringTable(BJsonValue root)
@@ -147,7 +144,7 @@ namespace Krampus.BinJson.Binary
 
             if (rawValue <= BJsonBinaryTypeRanges.PositiveFixIntMax)
             {
-                WriteByte((byte)rawValue);
+                _writer.WriteByte((byte)rawValue);
                 return;
             }
 
@@ -156,48 +153,48 @@ namespace Krampus.BinJson.Binary
                 if (signedValue >= sbyte.MinValue && signedValue <= sbyte.MaxValue)
                 {
                     WriteTypeCode(BJsonValueTypeCode.Int8);
-                    WriteByte(unchecked((byte)(sbyte)signedValue));
+                    _writer.WriteByte(unchecked((byte)(sbyte)signedValue));
                     return;
                 }
                 if (signedValue >= short.MinValue && signedValue <= short.MaxValue)
                 {
                     WriteTypeCode(BJsonValueTypeCode.Int16);
-                    WriteInt16((short)signedValue);
+                    _writer.WriteInt16LE((short)signedValue);
                     return;
                 }
                 if (signedValue >= int.MinValue && signedValue <= int.MaxValue)
                 {
                     WriteTypeCode(BJsonValueTypeCode.Int32);
-                    WriteInt32((int)signedValue);
+                    _writer.WriteInt32LE((int)signedValue);
                     return;
                 }
 
                 WriteTypeCode(BJsonValueTypeCode.Int64);
-                WriteInt64(signedValue);
+                _writer.WriteInt64LE(signedValue);
                 return;
             }
 
             if (rawValue <= byte.MaxValue)
             {
                 WriteTypeCode(BJsonValueTypeCode.UInt8);
-                WriteByte((byte)rawValue);
+                _writer.WriteByte((byte)rawValue);
                 return;
             }
             if (rawValue <= ushort.MaxValue)
             {
                 WriteTypeCode(BJsonValueTypeCode.UInt16);
-                WriteUInt16((ushort)rawValue);
+                _writer.WriteUInt16LE((ushort)rawValue);
                 return;
             }
             if (rawValue <= uint.MaxValue)
             {
                 WriteTypeCode(BJsonValueTypeCode.UInt32);
-                WriteUInt32((uint)rawValue);
+                _writer.WriteUInt32LE((uint)rawValue);
                 return;
             }
 
             WriteTypeCode(BJsonValueTypeCode.UInt64);
-            WriteUInt64(rawValue);
+            _writer.WriteUInt64LE(rawValue);
         }
 
         private void WriteFloat(BJsonValue value)
@@ -208,12 +205,12 @@ namespace Krampus.BinJson.Binary
             if (BitConverter.DoubleToInt64Bits(d) == BitConverter.DoubleToInt64Bits((double)f))
             {
                 WriteTypeCode(BJsonValueTypeCode.Float32);
-                WriteSingle(f);
+                _writer.WriteSingleLE(f);
             }
             else
             {
                 WriteTypeCode(BJsonValueTypeCode.Float64);
-                WriteDouble(d);
+                _writer.WriteDoubleLE(d);
             }
         }
 
@@ -224,12 +221,12 @@ namespace Krampus.BinJson.Binary
 
             if (array.Count <= 15)
             {
-                WriteByte((byte)(BJsonBinaryTypeRanges.FixArrayMin + array.Count));
+                _writer.WriteByte((byte)(BJsonBinaryTypeRanges.FixArrayMin + array.Count));
             }
             else
             {
                 WriteTypeCode(BJsonValueTypeCode.ArrayVar);
-                WriteVarUInt((ulong)array.Count);
+                _writer.WriteVarUInt((ulong)array.Count);
             }
 
             for (int i = 0; i < array.Count; i++)
@@ -250,17 +247,17 @@ namespace Krampus.BinJson.Binary
         {
             if (obj.Count <= 15)
             {
-                WriteByte((byte)(BJsonBinaryTypeRanges.FixObjectMin + obj.Count));
+                _writer.WriteByte((byte)(BJsonBinaryTypeRanges.FixObjectMin + obj.Count));
             }
             else
             {
                 WriteTypeCode(BJsonValueTypeCode.ObjectVar);
-                WriteVarUInt((ulong)obj.Count);
+                _writer.WriteVarUInt((ulong)obj.Count);
             }
 
             foreach (var pair in obj)
             {
-                WriteObjectKey(pair.Key);
+                WriteString(pair.Key);
                 PushPropertyPathSegment(pair.Key);
                 try
                 {
@@ -283,8 +280,8 @@ namespace Krampus.BinJson.Binary
                 return false;
 
             WriteTypeCode(BJsonValueTypeCode.PackedArray);
-            WriteByte((byte)plan.ElementTypeCode);
-            WriteVarUInt((ulong)array.Count);
+            _writer.WriteByte((byte)plan.ElementTypeCode);
+            _writer.WriteVarUInt((ulong)array.Count);
             WritePackedPayload(array, plan);
             return true;
         }
@@ -363,31 +360,34 @@ namespace Krampus.BinJson.Binary
                     WritePackedBools(array);
                     return;
                 case BJsonValueTypeCode.Int8:
-                    for (int i = 0; i < array.Count; i++) WriteByte(unchecked((byte)(sbyte)unchecked((long)array[i].ULongValue)));
+                    for (int i = 0; i < array.Count; i++) _writer.WriteByte(unchecked((byte)(sbyte)unchecked((long)array[i].ULongValue)));
                     return;
                 case BJsonValueTypeCode.Int16:
-                    for (int i = 0; i < array.Count; i++) WriteInt16((short)unchecked((long)array[i].ULongValue));
+                    for (int i = 0; i < array.Count; i++) _writer.WriteInt16LE((short)unchecked((long)array[i].ULongValue));
                     return;
                 case BJsonValueTypeCode.Int32:
-                    for (int i = 0; i < array.Count; i++) WriteInt32((int)unchecked((long)array[i].ULongValue));
+                    for (int i = 0; i < array.Count; i++) _writer.WriteInt32LE((int)unchecked((long)array[i].ULongValue));
                     return;
                 case BJsonValueTypeCode.Int64:
-                    for (int i = 0; i < array.Count; i++) WriteInt64(unchecked((long)array[i].ULongValue));
+                    for (int i = 0; i < array.Count; i++) _writer.WriteInt64LE(unchecked((long)array[i].ULongValue));
                     return;
                 case BJsonValueTypeCode.UInt8:
-                    for (int i = 0; i < array.Count; i++) WriteByte((byte)array[i].ULongValue);
+                    for (int i = 0; i < array.Count; i++) _writer.WriteByte((byte)array[i].ULongValue);
                     return;
                 case BJsonValueTypeCode.UInt16:
-                    for (int i = 0; i < array.Count; i++) WriteUInt16((ushort)array[i].ULongValue);
+                    for (int i = 0; i < array.Count; i++) _writer.WriteUInt16LE((ushort)array[i].ULongValue);
                     return;
                 case BJsonValueTypeCode.UInt32:
-                    for (int i = 0; i < array.Count; i++) WriteUInt32((uint)array[i].ULongValue);
+                    for (int i = 0; i < array.Count; i++) _writer.WriteUInt32LE((uint)array[i].ULongValue);
                     return;
                 case BJsonValueTypeCode.UInt64:
-                    for (int i = 0; i < array.Count; i++) WriteUInt64(array[i].ULongValue);
+                    for (int i = 0; i < array.Count; i++) _writer.WriteUInt64LE(array[i].ULongValue);
+                    return;
+                case BJsonValueTypeCode.Float32:
+                    for (int i = 0; i < array.Count; i++) _writer.WriteSingleLE((float)array[i].DoubleValue);
                     return;
                 case BJsonValueTypeCode.Float64:
-                    for (int i = 0; i < array.Count; i++) WriteDouble(array[i].DoubleValue);
+                    for (int i = 0; i < array.Count; i++) _writer.WriteDoubleLE(array[i].DoubleValue);
                     return;
                 default:
                     throw CreateSerializationException("Unsupported packed element type.", "WritePackedPayload");
@@ -397,27 +397,25 @@ namespace Krampus.BinJson.Binary
         private void WritePackedBools(BJsonArray array)
         {
             int byteCount = (array.Count + 7) / 8;
-            byte[] data = new byte[byteCount];
-
-            for (int i = 0; i < array.Count; i++)
+            byte[] data = ArrayPool<byte>.Shared.Rent(byteCount);
+            try
             {
-                if (array[i].BoolValue)
+                Array.Clear(data, 0, byteCount);
+                for (int i = 0; i < array.Count; i++)
                 {
-                    int byteIndex = i / 8;
-                    int bitIndex = i % 8;
-                    data[byteIndex] |= (byte)(1 << bitIndex);
+                    if (array[i].BoolValue)
+                    {
+                        int byteIndex = i / 8;
+                        int bitIndex = i % 8;
+                        data[byteIndex] |= (byte)(1 << bitIndex);
+                    }
                 }
+                _writer.Write(data.AsSpan(0, byteCount));
             }
-
-            _stream.Write(data, 0, data.Length);
-            _bytesWritten += data.Length;
-        }
-
-        private void WriteBinaryRaw(BJsonBinary value)
-        {
-            WriteVarUInt((ulong)value.Count);
-            _stream.Write(value.AsSpan());
-            _bytesWritten += value.Count;
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(data);
+            }
         }
 
         private void WriteString(string value)
@@ -425,7 +423,7 @@ namespace Krampus.BinJson.Binary
             if (_stringTable.TryGetValue(value, out int index))
             {
                 WriteTypeCode(BJsonValueTypeCode.StringRef);
-                WriteVarUInt((ulong)index);
+                _writer.WriteVarUInt((ulong)index);
                 return;
             }
 
@@ -435,9 +433,8 @@ namespace Krampus.BinJson.Binary
         private void WriteBinary(BJsonBinary value)
         {
             WriteTypeCode(BJsonValueTypeCode.Binary);
-            WriteVarUInt((ulong)value.Count);
-            _stream.Write(value.AsSpan());
-            _bytesWritten += value.Count;
+            _writer.WriteVarUInt((ulong)value.Count);
+            _writer.Write(value.AsSpan());
         }
 
         private void CollectStringFrequencies(BJsonValue value)
@@ -471,86 +468,111 @@ namespace Krampus.BinJson.Binary
 
         private void WriteStringData(string value)
         {
-            byte[] bytes = Utf8.GetBytes(value);
-            if (bytes.Length <= 31)
+            int maxByteCount = Utf8.GetMaxByteCount(value.Length);
+
+            if (_writer.BufferSize >= maxByteCount + 5)
             {
-                WriteByte((byte)(BJsonBinaryTypeRanges.FixStrMin + bytes.Length));
-            }
-            else if (bytes.Length <= byte.MaxValue)
-            {
-                WriteTypeCode(BJsonValueTypeCode.String8);
-                WriteByte((byte)bytes.Length);
-            }
-            else if (bytes.Length <= ushort.MaxValue)
-            {
-                WriteTypeCode(BJsonValueTypeCode.String16);
-                WriteUInt16((ushort)bytes.Length);
+                int actualUtf8Bytes = Utf8.GetBytes(value.AsSpan(), _writer.GetSpan(maxByteCount, 5));
+                int headerSize = CalculateStringHeaderSize(actualUtf8Bytes);
+
+                if (headerSize < 5)
+                    _writer.MoveTo(5, headerSize, actualUtf8Bytes);
+
+                WriteStringHeaderToSpan(_writer.GetSpan(headerSize), actualUtf8Bytes);
+                _writer.Advance(headerSize + actualUtf8Bytes);
             }
             else
             {
-                WriteTypeCode(BJsonValueTypeCode.String32);
-                WriteUInt32((uint)bytes.Length);
+                byte[] tempBuffer = ArrayPool<byte>.Shared.Rent(maxByteCount);
+                try
+                {
+                    int actualUtf8Bytes = Utf8.GetBytes(value.AsSpan(), tempBuffer);
+
+                    if (actualUtf8Bytes <= 31)
+                    {
+                        _writer.WriteByte((byte)(BJsonBinaryTypeRanges.FixStrMin + actualUtf8Bytes));
+                    }
+                    else if (actualUtf8Bytes <= byte.MaxValue)
+                    {
+                        WriteTypeCode(BJsonValueTypeCode.String8);
+                        _writer.WriteByte((byte)actualUtf8Bytes);
+                    }
+                    else if (actualUtf8Bytes <= ushort.MaxValue)
+                    {
+                        WriteTypeCode(BJsonValueTypeCode.String16);
+                        _writer.WriteUInt16LE((ushort)actualUtf8Bytes);
+                    }
+                    else
+                    {
+                        WriteTypeCode(BJsonValueTypeCode.String32);
+                        _writer.WriteUInt32LE((uint)actualUtf8Bytes);
+                    }
+
+                    _writer.Write(tempBuffer.AsSpan(0, actualUtf8Bytes));
+                }
+                finally
+                {
+                    ArrayPool<byte>.Shared.Return(tempBuffer);
+                }
             }
-            _stream.Write(bytes, 0, bytes.Length);
-            _bytesWritten += bytes.Length;
         }
 
-        private void WriteString32Payload(string value)
+        private static int CalculateStringHeaderSize(int byteLength)
         {
-            byte[] bytes = Utf8.GetBytes(value);
-            WriteUInt32((uint)bytes.Length);
-            _stream.Write(bytes, 0, bytes.Length);
-            _bytesWritten += bytes.Length;
+            if (byteLength <= 31) return 1;
+            if (byteLength <= byte.MaxValue) return 2;
+            if (byteLength <= ushort.MaxValue) return 3;
+            return 5;
         }
 
-        private void WriteObjectKey(string key)
+        private static void WriteStringHeaderToSpan(Span<byte> destination, int byteLength)
         {
-            WriteString(key);
+            if (byteLength <= 31)
+            {
+                destination[0] = (byte)(BJsonBinaryTypeRanges.FixStrMin + byteLength);
+            }
+            else if (byteLength <= byte.MaxValue)
+            {
+                destination[0] = (byte)BJsonValueTypeCode.String8;
+                destination[1] = (byte)byteLength;
+            }
+            else if (byteLength <= ushort.MaxValue)
+            {
+                destination[0] = (byte)BJsonValueTypeCode.String16;
+                BinaryPrimitives.WriteUInt16LittleEndian(destination[1..], (ushort)byteLength);
+            }
+            else
+            {
+                destination[0] = (byte)BJsonValueTypeCode.String32;
+                BinaryPrimitives.WriteUInt32LittleEndian(destination[1..], (uint)byteLength);
+            }
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private void WriteTypeCode(BJsonValueTypeCode code)
         {
-            _stream.WriteByte((byte)code);
-            _bytesWritten += 1;
-        }
-
-        private void WriteByte(byte value)
-        {
-            _singleByteBuffer[0] = value;
-            _stream.Write(_singleByteBuffer, 0, 1);
-            _bytesWritten += 1;
-        }
-
-        private void WriteVarUInt(ulong value)
-        {
-            while (value >= 0x80)
-            {
-                WriteByte((byte)((value & 0x7F) | 0x80));
-                value >>= 7;
-            }
-
-            WriteByte((byte)value);
+            _writer.WriteByte((byte)code);
         }
 
         private void WriteHeader(bool hasStringTable, bool hasExtContainer)
         {
             WriteTypeCode(BJsonValueTypeCode.HeaderMarker);
-            WriteByte((byte)'B');
-            WriteByte((byte)'J');
-            WriteByte(0x01);
+            _writer.WriteByte((byte)'B');
+            _writer.WriteByte((byte)'J');
+            _writer.WriteByte(0x01);
 
             byte flags = 0;
             if (hasStringTable)
                 flags |= 0x01;
             if (hasExtContainer)
                 flags |= 0x02;
-            WriteByte(flags);
+            _writer.WriteByte(flags);
         }
 
         private void WriteStringTable()
         {
             WriteTypeCode(BJsonValueTypeCode.StringTable);
-            WriteVarUInt((ulong)_stringTable.Count);
+            _writer.WriteVarUInt((ulong)_stringTable.Count);
 
             var ordered = new string[_stringTable.Count];
             foreach (var pair in _stringTable)
@@ -560,64 +582,6 @@ namespace Krampus.BinJson.Binary
             {
                 WriteStringData(ordered[i]);
             }
-        }
-
-        private void WriteInt16(short value)
-        {
-            BinaryPrimitives.WriteInt16LittleEndian(_numericBuffer.AsSpan(0, sizeof(short)), value);
-            _stream.Write(_numericBuffer, 0, sizeof(short));
-            _bytesWritten += sizeof(short);
-        }
-
-        private void WriteUInt16(ushort value)
-        {
-            BinaryPrimitives.WriteUInt16LittleEndian(_numericBuffer.AsSpan(0, sizeof(ushort)), value);
-            _stream.Write(_numericBuffer, 0, sizeof(ushort));
-            _bytesWritten += sizeof(ushort);
-        }
-
-        private void WriteInt32(int value)
-        {
-            BinaryPrimitives.WriteInt32LittleEndian(_numericBuffer.AsSpan(0, sizeof(int)), value);
-            _stream.Write(_numericBuffer, 0, sizeof(int));
-            _bytesWritten += sizeof(int);
-        }
-
-        private void WriteUInt32(uint value)
-        {
-            BinaryPrimitives.WriteUInt32LittleEndian(_numericBuffer.AsSpan(0, sizeof(uint)), value);
-            _stream.Write(_numericBuffer, 0, sizeof(uint));
-            _bytesWritten += sizeof(uint);
-        }
-
-        private void WriteInt64(long value)
-        {
-            BinaryPrimitives.WriteInt64LittleEndian(_numericBuffer.AsSpan(0, sizeof(long)), value);
-            _stream.Write(_numericBuffer, 0, sizeof(long));
-            _bytesWritten += sizeof(long);
-        }
-
-        private void WriteUInt64(ulong value)
-        {
-            BinaryPrimitives.WriteUInt64LittleEndian(_numericBuffer.AsSpan(0, sizeof(ulong)), value);
-            _stream.Write(_numericBuffer, 0, sizeof(ulong));
-            _bytesWritten += sizeof(ulong);
-        }
-
-        private void WriteSingle(float value)
-        {
-            int bits = BitConverter.SingleToInt32Bits(value);
-            BinaryPrimitives.WriteInt32LittleEndian(_numericBuffer.AsSpan(0, sizeof(int)), bits);
-            _stream.Write(_numericBuffer, 0, sizeof(int));
-            _bytesWritten += sizeof(int);
-        }
-
-        private void WriteDouble(double value)
-        {
-            long bits = BitConverter.DoubleToInt64Bits(value);
-            BinaryPrimitives.WriteInt64LittleEndian(_numericBuffer.AsSpan(0, sizeof(long)), bits);
-            _stream.Write(_numericBuffer, 0, sizeof(long));
-            _bytesWritten += sizeof(long);
         }
 
         private void PushIndexPathSegment(int index)
@@ -685,12 +649,13 @@ namespace Krampus.BinJson.Binary
                 ? new Dictionary<string, object?>(StringComparer.Ordinal)
                 : new Dictionary<string, object?>(details, StringComparer.Ordinal);
 
-            map["byteOffset"] = _bytesWritten;
+            long totalWrittenBytes = _writer.BytesWritten + _writer.BufferPos;
+            map["byteOffset"] = totalWrittenBytes;
             map["path"] = BuildCurrentPath();
 
             return new BJsonSerializationException(
                 message,
-                byteOffset: _bytesWritten,
+                byteOffset: totalWrittenBytes,
                 operation: operation,
                 documentPath: BuildCurrentPath(),
                 innerException: innerException,
