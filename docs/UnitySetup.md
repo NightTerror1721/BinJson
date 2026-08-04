@@ -38,6 +38,8 @@ BinJson is a compact JSON DOM and binary serialization library designed to work 
 			   └── JsonTextParser.cs
    ```
 
+   The tree above is illustrative, not exhaustive. Copy the entire `BinJson/` folder so the serialization, text, binary, and utility namespaces remain consistent.
+
 3. **Wait for Unity to recompile** the code.
 
 ### Option 2: Unity Package Manager (UPM)
@@ -196,6 +198,38 @@ public class ConfigWriter : MonoBehaviour
 		File.WriteAllText(Application.dataPath + "/config.json", prettyJson);
 
 		Debug.Log("Config written:\n" + prettyJson);
+	}
+}
+```
+
+### Example 4: Serialize a Typed Save Model
+
+```csharp
+using UnityEngine;
+using Krampus.BinJson;
+using Krampus.BinJson.Serialization;
+
+[BJsonSerializable]
+public sealed class PlayerSave
+{
+	public string PlayerName { get; set; } = string.Empty;
+	public int Level { get; set; }
+}
+
+public class TypedSaveExample : MonoBehaviour
+{
+	void Start()
+	{
+		var save = new PlayerSave
+		{
+			PlayerName = "Hero",
+			Level = 12
+		};
+
+		BJsonValue value = BJson.Serialize(save);
+		PlayerSave? roundTrip = BJson.Deserialize<PlayerSave>(value);
+
+		Debug.Log($"Round-trip level: {roundTrip?.Level}");
 	}
 }
 ```

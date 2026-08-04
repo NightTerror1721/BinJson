@@ -110,6 +110,22 @@ namespace Krampus.BinJson.Tests
         }
 
         [Fact]
+        public void Deserialize_UsesFactoryMethodParameterMapping()
+        {
+            var json = new BJsonObject
+            {
+                ["coord_x"] = BJsonValue.Create(10),
+                ["coord_y"] = BJsonValue.Create(20)
+            };
+
+            var result = BJson.Deserialize<FactoryMappedPoint>(BJsonValue.Create(json));
+
+            Assert.NotNull(result);
+            Assert.Equal(10, result!.X);
+            Assert.Equal(20, result.Y);
+        }
+
+        [Fact]
         public void Deserialize_MissingRequiredMember_Throws()
         {
             var json = new BJsonObject();
@@ -208,6 +224,252 @@ namespace Krampus.BinJson.Tests
             Assert.Equal(new Uri("https://example.com/docs"), result.Link);
         }
 
+        [Fact]
+        public void Deserialize_NullToken_UsesConfiguredDefault_ForNonNullableValueType()
+        {
+            var json = new BJsonObject
+            {
+                ["Count"] = BJsonValue.Null
+            };
+
+            var result = BJson.Deserialize<NullDefaultModel>(BJsonValue.Create(json));
+
+            Assert.NotNull(result);
+            Assert.Equal(7, result!.Count);
+        }
+
+        [Fact]
+        public void Serialize_WhenWritingCustomDefault_UsesProviderDefaultValue()
+        {
+            var sameAsProvider = new CustomDefaultIgnoreModel { Count = 42 };
+            var differentThanProvider = new CustomDefaultIgnoreModel { Count = 0 };
+
+            var sameSerialized = BJson.Serialize(sameAsProvider);
+            var differentSerialized = BJson.Serialize(differentThanProvider);
+
+            Assert.True(sameSerialized.TryGetObject(out var sameObj));
+            Assert.False(sameObj.ContainsKey("Count"));
+
+            Assert.True(differentSerialized.TryGetObject(out var differentObj));
+            Assert.True(differentObj.ContainsKey("Count"));
+            Assert.Equal(0, differentObj["Count"].IntValue);
+        }
+
+        [Fact]
+        public void Serialize_TypeLevelVersion_GuardsMembers_And_ComposesWithMemberVersion()
+        {
+            var model = new TypeVersionedModel
+            {
+                AlwaysInTypeRange = 10,
+                LegacyInType = 20
+            };
+
+            var belowTypeRangeOptions = new BJsonSerializerOptions
+            {
+                Version = new Version(1, 0, 0)
+            };
+
+            var inTypeRangeOptions = new BJsonSerializerOptions
+            {
+                Version = new Version(2, 0, 0)
+            };
+
+            var afterMemberRemovalOptions = new BJsonSerializerOptions
+            {
+                Version = new Version(3, 0, 0)
+            };
+
+            var belowTypeRange = BJson.Serialize(model, typeof(TypeVersionedModel), belowTypeRangeOptions);
+            var inTypeRange = BJson.Serialize(model, typeof(TypeVersionedModel), inTypeRangeOptions);
+            var afterMemberRemoval = BJson.Serialize(model, typeof(TypeVersionedModel), afterMemberRemovalOptions);
+
+            Assert.True(belowTypeRange.TryGetObject(out var belowObj));
+            Assert.False(belowObj.ContainsKey("AlwaysInTypeRange"));
+            Assert.False(belowObj.ContainsKey("LegacyInType"));
+
+            Assert.True(inTypeRange.TryGetObject(out var inObj));
+            Assert.True(inObj.ContainsKey("AlwaysInTypeRange"));
+            Assert.True(inObj.ContainsKey("LegacyInType"));
+
+            Assert.True(afterMemberRemoval.TryGetObject(out var removedObj));
+            Assert.True(removedObj.ContainsKey("AlwaysInTypeRange"));
+            Assert.False(removedObj.ContainsKey("LegacyInType"));
+        }
+
+        [Fact]
+        public void Deserialize_UsesMultipleAliases_ForLegacyMemberNames()
+        {
+            var json = new BJsonObject
+            {
+                ["legacy_count_2"] = BJsonValue.Create(9)
+            };
+
+            var model = BJson.Deserialize<AliasedModel>(BJsonValue.Create(json));
+
+            Assert.NotNull(model);
+            Assert.Equal(9, model!.Count);
+        }
+
+        [Fact]
+        public void Deserialize_RequiredWhen_UsesVersionState()
+        {
+            var json = new BJsonObject();
+            var v1 = new BJsonSerializerOptions { Version = new Version(1, 0, 0) };
+            var v2 = new BJsonSerializerOptions { Version = new Version(2, 0, 0) };
+
+            var modelV1 = BJson.Deserialize<ConditionalRequiredModel>(BJsonValue.Create(json), v1);
+            Assert.NotNull(modelV1);
+
+            Assert.Throws<Krampus.BinJson.Error.BJsonDeserializationException>(() =>
+                BJson.Deserialize<ConditionalRequiredModel>(BJsonValue.Create(json), v2));
+        }
+
+        [Fact]
+        public void Deserialize_DefaultProvider_CanUseActiveVersion()
+        {
+            var json = new BJsonObject();
+            var v1 = new BJsonSerializerOptions { Version = new Version(1, 0, 0) };
+            var v3 = new BJsonSerializerOptions { Version = new Version(3, 0, 0) };
+
+            var legacy = BJson.Deserialize<VersionAwareDefaultProviderModel>(BJsonValue.Create(json), v1);
+            var modern = BJson.Deserialize<VersionAwareDefaultProviderModel>(BJsonValue.Create(json), v3);
+
+            Assert.NotNull(legacy);
+            Assert.NotNull(modern);
+            Assert.Equal(10, legacy!.Value);
+            Assert.Equal(30, modern!.Value);
+        }
+
+        [Fact]
+        public void SerializeAndDeserialize_UsesOpenGenericConverterFactory()
+        {
+            var model = new FactoryConverterModel
+            {
+                Age = new Wrapped<int>(17)
+            };
+
+            var serialized = BJson.Serialize(model);
+            Assert.True(serialized.TryGetObject(out var obj));
+            Assert.Equal(17, obj["Age"].IntValue);
+
+            var roundTrip = BJson.Deserialize<FactoryConverterModel>(serialized);
+            Assert.NotNull(roundTrip);
+            Assert.Equal(17, roundTrip!.Age.Value);
+        }
+
+        [Fact]
+        public void Polymorphic_DiscriminatorValue_WorksWithoutDerivedRegistration()
+        {
+            Vehicle vehicle = new Car
+            {
+                Name = "Falcon",
+                Doors = 4
+            };
+
+            var serialized = BJson.Serialize(vehicle, typeof(Vehicle));
+            Assert.True(serialized.TryGetObject(out var obj));
+            Assert.Equal("car", obj["$type"].StringValue);
+
+            var roundTrip = BJson.Deserialize<Vehicle>(serialized);
+            var car = Assert.IsType<Car>(roundTrip);
+            Assert.Equal("Falcon", car.Name);
+            Assert.Equal(4, car.Doors);
+        }
+
+        [Fact]
+        public void LifecycleHooks_RunOnSerializeAndDeserialize()
+        {
+            var model = new LifecycleModel { Count = 2 };
+
+            var serialized = BJson.Serialize(model);
+            Assert.True(serialized.TryGetObject(out var obj));
+            Assert.Equal(3, obj["Count"].IntValue);
+
+            var deserialized = BJson.Deserialize<LifecycleModel>(serialized);
+            Assert.NotNull(deserialized);
+            Assert.True(deserialized!.AfterDeserializeRan);
+        }
+
+        [Fact]
+        public void NumberHandling_AllowsStringRead_AndLosslessStringWrite()
+        {
+            var json = new BJsonObject
+            {
+                ["Count"] = BJsonValue.Create("42"),
+                ["Amount"] = BJsonValue.Create("123.5")
+            };
+
+            var model = BJson.Deserialize<NumberHandlingModel>(BJsonValue.Create(json));
+            Assert.NotNull(model);
+            Assert.Equal(42, model!.Count);
+            Assert.Equal(123.5m, model.Amount);
+
+            var serialized = BJson.Serialize(model);
+            Assert.True(serialized.TryGetObject(out var outObj));
+            Assert.Equal("123.5", outObj["Amount"].StringValue);
+        }
+
+        [Fact]
+        public void Deserialize_MultipleFactoryMethods_ThrowsMetadataException()
+        {
+            var json = new BJsonObject
+            {
+                ["Value"] = BJsonValue.Create(10)
+            };
+
+            Assert.Throws<Krampus.BinJson.Error.BJsonMetadataException>(() =>
+                BJson.Deserialize<MultipleFactoryMethodsModel>(BJsonValue.Create(json)));
+        }
+
+        [Fact]
+        public void Deserialize_InvalidFactorySignature_ThrowsMetadataException()
+        {
+            var json = new BJsonObject
+            {
+                ["Value"] = BJsonValue.Create(10)
+            };
+
+            Assert.Throws<Krampus.BinJson.Error.BJsonMetadataException>(() =>
+                BJson.Deserialize<InvalidFactorySignatureModel>(BJsonValue.Create(json)));
+        }
+
+        [Fact]
+        public void Deserialize_FactoryParameterMapping_UnknownParameter_ThrowsMetadataException()
+        {
+            var json = new BJsonObject
+            {
+                ["coord_x"] = BJsonValue.Create(1)
+            };
+
+            Assert.Throws<Krampus.BinJson.Error.BJsonMetadataException>(() =>
+                BJson.Deserialize<InvalidFactoryUnknownParameterMappingModel>(BJsonValue.Create(json)));
+        }
+
+        [Fact]
+        public void Deserialize_FactoryParameterMapping_DuplicateJsonKey_ThrowsMetadataException()
+        {
+            var json = new BJsonObject
+            {
+                ["coord"] = BJsonValue.Create(1)
+            };
+
+            Assert.Throws<Krampus.BinJson.Error.BJsonMetadataException>(() =>
+                BJson.Deserialize<InvalidFactoryDuplicateJsonKeyMappingModel>(BJsonValue.Create(json)));
+        }
+
+        [Fact]
+        public void Deserialize_PrivateFactoryMethod_IsSupported()
+        {
+            var json = new BJsonObject
+            {
+                ["value"] = BJsonValue.Create(5)
+            };
+
+            var result = BJson.Deserialize<PrivateFactoryMethodModel>(BJsonValue.Create(json));
+            Assert.NotNull(result);
+            Assert.Equal(5, result!.Value);
+        }
+
         public sealed class SampleModel
         {
             [BJsonPropertyName("identifier")]
@@ -292,6 +554,19 @@ namespace Krampus.BinJson.Tests
             public int Level { get; }
         }
 
+        public sealed class FactoryMappedPoint
+        {
+            public int X { get; set; }
+
+            public int Y { get; set; }
+
+            [BJsonFactoryMethod(ParameterMapping = new[] { "x", "coord_x", "y", "coord_y" })]
+            public static FactoryMappedPoint Create(int x, int y)
+            {
+                return new FactoryMappedPoint { X = x, Y = y };
+            }
+        }
+
         [BJsonSerializable]
         public sealed class RequiredModel
         {
@@ -342,6 +617,238 @@ namespace Krampus.BinJson.Tests
             public TimeSpan Duration { get; set; }
 
             public Uri? Link { get; set; }
+        }
+
+        [BJsonSerializable]
+        public sealed class NullDefaultModel
+        {
+            [BJsonDefaultValue(7)]
+            public int Count { get; set; }
+        }
+
+        [BJsonSerializable]
+        public sealed class CustomDefaultIgnoreModel
+        {
+            [BJsonDefaultProvider(nameof(GetDefaultCount))]
+            [BJsonIgnore(Condition = BJsonIgnoreCondition.WhenWritingCustomDefault)]
+            public int Count { get; set; }
+
+            internal static int GetDefaultCount()
+            {
+                return 42;
+            }
+        }
+
+        [BJsonSerializable]
+        [BJsonVersionContext(typeof(Version), "2.0.0")]
+        [BJsonVersion(typeof(Version), introducedIn: "2.0.0")]
+        public sealed class TypeVersionedModel
+        {
+            public int AlwaysInTypeRange { get; set; }
+
+            [BJsonVersion(typeof(Version), removedIn: "3.0.0")]
+            public int LegacyInType { get; set; }
+        }
+
+        [BJsonSerializable]
+        public sealed class MultipleFactoryMethodsModel
+        {
+            public int Value { get; set; }
+
+            [BJsonFactoryMethod]
+            public static MultipleFactoryMethodsModel CreateA(int value)
+            {
+                return new MultipleFactoryMethodsModel { Value = value };
+            }
+
+            [BJsonFactoryMethod]
+            public static MultipleFactoryMethodsModel CreateB(int value)
+            {
+                return new MultipleFactoryMethodsModel { Value = value };
+            }
+        }
+
+        [BJsonSerializable]
+        public sealed class InvalidFactorySignatureModel
+        {
+            public int Value { get; set; }
+
+            [BJsonFactoryMethod]
+            public static string Create(int value)
+            {
+                return value.ToString();
+            }
+        }
+
+        [BJsonSerializable]
+        public sealed class InvalidFactoryUnknownParameterMappingModel
+        {
+            public int X { get; set; }
+
+            [BJsonFactoryMethod(ParameterMapping = new[] { "missing", "coord_x" })]
+            public static InvalidFactoryUnknownParameterMappingModel Create(int x)
+            {
+                return new InvalidFactoryUnknownParameterMappingModel { X = x };
+            }
+        }
+
+        [BJsonSerializable]
+        public sealed class InvalidFactoryDuplicateJsonKeyMappingModel
+        {
+            public int X { get; set; }
+
+            public int Y { get; set; }
+
+            [BJsonFactoryMethod(ParameterMapping = new[] { "x", "coord", "y", "coord" })]
+            public static InvalidFactoryDuplicateJsonKeyMappingModel Create(int x, int y)
+            {
+                return new InvalidFactoryDuplicateJsonKeyMappingModel { X = x, Y = y };
+            }
+        }
+
+        [BJsonSerializable]
+        public sealed class PrivateFactoryMethodModel
+        {
+            private PrivateFactoryMethodModel(int value)
+            {
+                Value = value;
+            }
+
+            public int Value { get; }
+
+            [BJsonFactoryMethod]
+            private static PrivateFactoryMethodModel Create(int value)
+            {
+                return new PrivateFactoryMethodModel(value);
+            }
+        }
+
+        [BJsonSerializable]
+        public sealed class AliasedModel
+        {
+            [BJsonAlias("legacy_count_1")]
+            [BJsonAlias("legacy_count_2")]
+            public int Count { get; set; }
+        }
+
+        [BJsonSerializable]
+        public sealed class ConditionalRequiredModel
+        {
+            [BJsonRequiredWhen(nameof(IsNameRequired))]
+            public string? Name { get; set; }
+
+            private static bool IsNameRequired(string memberName, IComparable? version)
+            {
+                if (!string.Equals(memberName, "Name", StringComparison.Ordinal))
+                    return false;
+
+                return version is Version semantic && semantic >= new Version(2, 0, 0);
+            }
+        }
+
+        [BJsonSerializable]
+        public sealed class VersionAwareDefaultProviderModel
+        {
+            [BJsonDefaultProvider(nameof(GetDefaultValue))]
+            public int Value { get; set; }
+
+            private static object GetDefaultValue(IComparable? version)
+            {
+                if (version is Version semantic && semantic >= new Version(3, 0, 0))
+                    return 30;
+
+                return 10;
+            }
+        }
+
+        [BJsonSerializable]
+        public sealed class FactoryConverterModel
+        {
+            [BJsonConverterFactory(typeof(WrappedConverterFactory))]
+            public Wrapped<int> Age { get; set; }
+        }
+
+        public readonly struct Wrapped<T>
+        {
+            public Wrapped(T value)
+            {
+                Value = value;
+            }
+
+            public T Value { get; }
+        }
+
+        public sealed class WrappedConverterFactory : IBJsonConverterFactory
+        {
+            public bool CanConvert(Type type)
+            {
+                return type.IsGenericType && type.GetGenericTypeDefinition() == typeof(Wrapped<>);
+            }
+
+            public IBJsonConverter? CreateConverter(Type type)
+            {
+                if (!CanConvert(type))
+                    return null;
+
+                var itemType = type.GetGenericArguments()[0];
+                var converterType = typeof(WrappedConverter<>).MakeGenericType(itemType);
+                return Activator.CreateInstance(converterType) as IBJsonConverter;
+            }
+        }
+
+        public sealed class WrappedConverter<T> : BJsonConverter<Wrapped<T>>
+        {
+            public override BJsonValue Serialize(Wrapped<T> value, BJsonSerializationContext context)
+            {
+                return context.Serialize(value.Value, typeof(T));
+            }
+
+            public override Wrapped<T> Deserialize(BJsonValue value, BJsonSerializationContext context)
+            {
+                return new Wrapped<T>(context.Deserialize<T>(value)!);
+            }
+        }
+
+        [BJsonPolymorphic]
+        public abstract class Vehicle
+        {
+            public string Name { get; set; } = string.Empty;
+        }
+
+        [BJsonDiscriminatorValue("car")]
+        public sealed class Car : Vehicle
+        {
+            public int Doors { get; set; }
+        }
+
+        [BJsonSerializable]
+        public sealed class LifecycleModel
+        {
+            public int Count { get; set; }
+
+            public bool AfterDeserializeRan { get; private set; }
+
+            [BJsonOnSerializing]
+            private void OnSerializing(BJsonSerializationContext context)
+            {
+                Count += 1;
+            }
+
+            [BJsonOnDeserialized]
+            private void OnDeserialized()
+            {
+                AfterDeserializeRan = true;
+            }
+        }
+
+        [BJsonSerializable]
+        public sealed class NumberHandlingModel
+        {
+            [BJsonNumberHandling(BJsonNumberHandling.AllowReadingFromString)]
+            public int Count { get; set; }
+
+            [BJsonNumberHandling(BJsonNumberHandling.AllowReadingFromString | BJsonNumberHandling.Lossless)]
+            public decimal Amount { get; set; }
         }
     }
 }

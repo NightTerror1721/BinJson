@@ -8,11 +8,12 @@ namespace Krampus.BinJson.SourceGenerators.Models
     /// </summary>
     internal sealed class DefaultValueInfo
     {
-        private DefaultValueInfo(bool hasConstant, object? constantValue, string? providerMethod)
+        private DefaultValueInfo(bool hasConstant, object? constantValue, string? providerMethod, bool providerAcceptsVersion)
         {
             HasConstant = hasConstant;
             ConstantValue = constantValue;
             ProviderMethod = providerMethod;
+            ProviderAcceptsVersion = providerAcceptsVersion;
         }
 
         /// <summary>True when a [BJsonDefaultValue] constant was parsed.</summary>
@@ -30,19 +31,22 @@ namespace Krampus.BinJson.SourceGenerators.Models
         /// <summary>True when a [BJsonDefaultProvider] method name was parsed.</summary>
         public bool HasProviderMethod => ProviderMethod != null;
 
+        /// <summary>True when the provider method signature includes IComparable version.</summary>
+        public bool ProviderAcceptsVersion { get; }
+
         /// <summary>Creates a DefaultValueInfo for a compile-time constant default.</summary>
         public static DefaultValueInfo FromConstant(object? value) =>
-            new DefaultValueInfo(hasConstant: true, constantValue: value, providerMethod: null);
+            new DefaultValueInfo(hasConstant: true, constantValue: value, providerMethod: null, providerAcceptsVersion: false);
 
         /// <summary>Creates a DefaultValueInfo for a static provider method default.</summary>
-        public static DefaultValueInfo FromProvider(string methodName) =>
-            new DefaultValueInfo(hasConstant: false, constantValue: null, providerMethod: methodName);
+        public static DefaultValueInfo FromProvider(string methodName, bool providerAcceptsVersion = false) =>
+            new DefaultValueInfo(hasConstant: false, constantValue: null, providerMethod: methodName, providerAcceptsVersion: providerAcceptsVersion);
 
         /// <summary>
         /// Creates a DefaultValueInfo combining both a constant and a provider method.
         /// The provider takes priority at code-generation time; a warning is emitted.
         /// </summary>
-        public static DefaultValueInfo FromBoth(object? constantValue, string providerMethod) =>
-            new DefaultValueInfo(hasConstant: true, constantValue: constantValue, providerMethod: providerMethod);
+        public static DefaultValueInfo FromBoth(object? constantValue, string providerMethod, bool providerAcceptsVersion = false) =>
+            new DefaultValueInfo(hasConstant: true, constantValue: constantValue, providerMethod: providerMethod, providerAcceptsVersion: providerAcceptsVersion);
     }
 }

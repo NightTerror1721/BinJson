@@ -12,7 +12,7 @@ namespace Krampus.BinJson.Serialization
     /// </para>
     /// <para>
     /// During <b>serialization</b>, the member value is written to a separate file and the
-    /// current document stores a <c>{ "$ref": "path" }</c> token in its place.
+    /// current document stores the reference file path as a string token in its place.
     /// </para>
     /// <para>
     /// When <see cref="FixedPath"/> is <c>null</c>, the path is read from the JSON value of

@@ -30,7 +30,7 @@ namespace Krampus.BinJson.Serialization
     /// [BJsonIgnoreWhen(nameof(ShouldIgnoreScore))]
     /// public int Score { get; set; }
     ///
-    /// private static bool ShouldIgnoreScore(object? value, string propertyName, IComparable? version)
+    /// internal static bool ShouldIgnoreScore(object? value, string propertyName, IComparable? version)
     ///     => version != null &amp;&amp; version.CompareTo(new Version("2.0")) &lt; 0 &amp;&amp; (int)value! == 0;
     /// </code>
     /// </example>

@@ -38,11 +38,15 @@ namespace Krampus.BinJson.Serialization
     /// Conditional block syntax in JSON documents:
     /// <code>
     /// {
-    ///   "$if":   { "$var": "Platform", "$eq": "PC" },
-    ///   "$then": { "GraphicsQuality": "Ultra" },
-    ///   "$elif": { "$var": "Platform", "$eq": "Mobile" },
-    ///   "$then": { "GraphicsQuality": "Low" },
-    ///   "$else": { "GraphicsQuality": "Medium" }
+    ///   "$branches": [
+    ///     {
+    ///       "$if":   { "$var": "Platform", "$eq": "PC" },
+    ///       "$then": { "GraphicsQuality": "Ultra" }
+    ///     },
+    ///     {
+    ///       "$else": { "GraphicsQuality": "Medium" }
+    ///     }
+    ///   ]
     /// }
     /// </code>
     /// </example>

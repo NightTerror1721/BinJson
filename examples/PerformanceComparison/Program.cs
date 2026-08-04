@@ -13,6 +13,7 @@ using Krampus.BinJson.Text;
 const int warmupIterations = 24;
 const int fastIterations = 5000;
 const int mediumIterations = 1500;
+const int advancedIterations = 320;
 
 var smallObject = CreateSmallObject();
 var repeatedStringsObject = CreateRepeatedStringsObject();
@@ -23,6 +24,41 @@ var reflectionProfile = CreateReflectionProfile();
 var generatedProfile = CreateGeneratedProfile();
 var attributedReflectionProfile = CreateAttributedReflectionProfile();
 var attributedGeneratedProfile = CreateAttributedGeneratedProfile();
+var advancedReflectionProfile = CreateAdvancedReflectionProfile();
+var advancedGeneratedProfile = CreateAdvancedGeneratedProfile();
+var reflectionPolymorphicActor = CreateReflectionPolymorphicActor();
+var generatedPolymorphicActor = CreateGeneratedPolymorphicActor();
+
+var sprint7TempDirectory = Path.Combine(Path.GetTempPath(), "binjson-perf-sprint7-" + Guid.NewGuid().ToString("N"));
+Directory.CreateDirectory(sprint7TempDirectory);
+
+var sprint7Context = new BJsonPreprocessorContext
+{
+    BasePath = sprint7TempDirectory
+};
+sprint7Context.SetVariable("Platform", "Desktop");
+sprint7Context.SetVariable("ModeToken", "boost");
+
+var sprint7Options = new BJsonSerializerOptions
+{
+    PreprocessorContext = sprint7Context
+};
+
+var sprint7WriteOptions = new BJsonSerializerOptions
+{
+    PreprocessorContext = new BJsonPreprocessorContext
+    {
+        BasePath = sprint7TempDirectory
+    }
+};
+
+var externalStatePath = Path.Combine(sprint7TempDirectory, "state.bjson");
+var fixedExternalStatePath = Path.Combine(sprint7TempDirectory, "state-fixed.bjson");
+BJson.SerializeToFile(externalStatePath, CreateAdvancedExternalStateDocument());
+BJson.SerializeToFile(fixedExternalStatePath, CreateAdvancedExternalStateDocument());
+
+var advancedPreprocessorPayload = CreateAdvancedPreprocessorPayload(externalStatePath);
+var advancedExternalFixedPathPayload = CreateAdvancedExternalFixedPathPayload();
 
 var repeatedWithTableOptions = new BJsonBinaryWriterOptions { EnableStringTable = true, EnablePackedArrays = true };
 var repeatedWithoutTableOptions = new BJsonBinaryWriterOptions { EnableStringTable = false, EnablePackedArrays = true };
@@ -333,7 +369,106 @@ RunClrDeserializeScenario(
     typeof(AttributedGeneratedProfile),
     mediumIterations);
 
+RunClrSerializeScenario(
+    "CLR advanced mapper/default reflection serialize",
+    advancedReflectionProfile,
+    typeof(AdvancedReflectionProfile),
+    mediumIterations);
+
+RunClrSerializeScenario(
+    "CLR advanced mapper/default generated serialize",
+    advancedGeneratedProfile,
+    typeof(AdvancedGeneratedProfile),
+    mediumIterations);
+
+var advancedReflectionSerialized = BJson.Serialize(advancedReflectionProfile, typeof(AdvancedReflectionProfile));
+var advancedGeneratedSerialized = BJson.Serialize(advancedGeneratedProfile, typeof(AdvancedGeneratedProfile));
+
+RunClrDeserializeScenario(
+    "CLR advanced mapper/default reflection deserialize",
+    advancedReflectionSerialized,
+    typeof(AdvancedReflectionProfile),
+    mediumIterations);
+
+RunClrDeserializeScenario(
+    "CLR advanced mapper/default generated deserialize",
+    advancedGeneratedSerialized,
+    typeof(AdvancedGeneratedProfile),
+    mediumIterations);
+
+RunClrDeserializeScenarioWithOptions(
+    "CLR advanced preprocess reflection deserialize",
+    advancedPreprocessorPayload,
+    typeof(AdvancedReflectionConfig),
+    advancedIterations,
+    sprint7Options);
+
+RunClrDeserializeScenarioWithOptions(
+    "CLR advanced preprocess generated deserialize",
+    advancedPreprocessorPayload,
+    typeof(AdvancedGeneratedConfig),
+    advancedIterations,
+    sprint7Options);
+
+RunClrDeserializeScenarioWithOptions(
+    "CLR advanced external-ref fixed reflection deserialize",
+    advancedExternalFixedPathPayload,
+    typeof(AdvancedReflectionExternalRefConfig),
+    advancedIterations,
+    sprint7Options);
+
+RunClrDeserializeScenarioWithOptions(
+    "CLR advanced external-ref fixed generated deserialize",
+    advancedExternalFixedPathPayload,
+    typeof(AdvancedGeneratedExternalRefConfig),
+    advancedIterations,
+    sprint7Options);
+
+RunClrSerializeScenarioWithOptions(
+    "CLR advanced external-ref fixed reflection serialize",
+    new AdvancedReflectionExternalRefConfig { State = new AdvancedExternalState { Flags = "steady", Power = 17 } },
+    typeof(AdvancedReflectionExternalRefConfig),
+    advancedIterations,
+    sprint7WriteOptions);
+
+RunClrSerializeScenarioWithOptions(
+    "CLR advanced external-ref fixed generated serialize",
+    new AdvancedGeneratedExternalRefConfig { State = new AdvancedExternalState { Flags = "steady", Power = 17 } },
+    typeof(AdvancedGeneratedExternalRefConfig),
+    advancedIterations,
+    sprint7WriteOptions);
+
+RunClrSerializeScenario(
+    "CLR advanced polymorphic reflection serialize",
+    reflectionPolymorphicActor,
+    typeof(ReflectionActorBase),
+    mediumIterations);
+
+RunClrSerializeScenario(
+    "CLR advanced polymorphic generated serialize",
+    generatedPolymorphicActor,
+    typeof(GeneratedActorBase),
+    mediumIterations);
+
+var reflectionPolymorphicSerialized = BJson.Serialize(reflectionPolymorphicActor, typeof(ReflectionActorBase));
+var generatedPolymorphicSerialized = BJson.Serialize(generatedPolymorphicActor, typeof(GeneratedActorBase));
+
+RunClrDeserializeScenario(
+    "CLR advanced polymorphic reflection deserialize",
+    reflectionPolymorphicSerialized,
+    typeof(ReflectionActorBase),
+    mediumIterations);
+
+RunClrDeserializeScenario(
+    "CLR advanced polymorphic generated deserialize",
+    generatedPolymorphicSerialized,
+    typeof(GeneratedActorBase),
+    mediumIterations);
+
 PrintComparisonSummary(BenchmarkStore.Results);
+
+if (Directory.Exists(sprint7TempDirectory))
+    Directory.Delete(sprint7TempDirectory, recursive: true);
 
 static void RunSerializeScenario(
     string name,
@@ -511,6 +646,23 @@ static void RunClrSerializeScenario(string name, object value, Type declaredType
     PrintResult(name, iterations, payloadSize, elapsed, allocatedBytes);
 }
 
+static void RunClrSerializeScenarioWithOptions(string name, object value, Type declaredType, int iterations, BJsonSerializerOptions options)
+{
+    Warmup(warmupIterations, () => BJson.Serialize(value, declaredType, options));
+
+    int payloadSize = BJsonBinaryWriter.Serialize(BJson.Serialize(value, declaredType, options)).Length;
+    long allocatedBytes = MeasureAllocatedBytes(iterations, () =>
+    {
+        _ = BJson.Serialize(value, declaredType, options);
+    });
+    TimeSpan elapsed = MeasureElapsed(iterations, () =>
+    {
+        _ = BJson.Serialize(value, declaredType, options);
+    });
+
+    PrintResult(name, iterations, payloadSize, elapsed, allocatedBytes);
+}
+
 static void RunClrDeserializeScenario(string name, BJsonValue payload, Type targetType, int iterations)
 {
     Warmup(warmupIterations, () => BJson.Deserialize(payload, targetType));
@@ -523,6 +675,23 @@ static void RunClrDeserializeScenario(string name, BJsonValue payload, Type targ
     TimeSpan elapsed = MeasureElapsed(iterations, () =>
     {
         _ = BJson.Deserialize(payload, targetType);
+    });
+
+    PrintResult(name, iterations, payloadSize, elapsed, allocatedBytes);
+}
+
+static void RunClrDeserializeScenarioWithOptions(string name, BJsonValue payload, Type targetType, int iterations, BJsonSerializerOptions options)
+{
+    Warmup(warmupIterations, () => BJson.Deserialize(payload, targetType, options));
+
+    int payloadSize = BJsonBinaryWriter.Serialize(payload).Length;
+    long allocatedBytes = MeasureAllocatedBytes(iterations, () =>
+    {
+        _ = BJson.Deserialize(payload, targetType, options);
+    });
+    TimeSpan elapsed = MeasureElapsed(iterations, () =>
+    {
+        _ = BJson.Deserialize(payload, targetType, options);
     });
 
     PrintResult(name, iterations, payloadSize, elapsed, allocatedBytes);
@@ -716,6 +885,13 @@ static void PrintComparisonSummary(Dictionary<string, (string Name, int Iteratio
     PrintComparison(results, "CLR deserialize: generated vs reflection", "CLR reflection deserialize", "CLR generated deserialize");
     PrintComparison(results, "CLR attributed serialize: generated vs reflection", "CLR attributed reflection serialize", "CLR attributed generated serialize");
     PrintComparison(results, "CLR attributed deserialize missing defaults: generated vs reflection", "CLR attributed reflection deserialize missing defaults", "CLR attributed generated deserialize missing defaults");
+    PrintComparison(results, "CLR advanced mapper/default serialize: generated vs reflection", "CLR advanced mapper/default reflection serialize", "CLR advanced mapper/default generated serialize");
+    PrintComparison(results, "CLR advanced mapper/default deserialize: generated vs reflection", "CLR advanced mapper/default reflection deserialize", "CLR advanced mapper/default generated deserialize");
+    PrintComparison(results, "CLR advanced preprocessor deserialize: generated vs reflection", "CLR advanced preprocess reflection deserialize", "CLR advanced preprocess generated deserialize");
+    PrintComparison(results, "CLR advanced external-ref fixed deserialize: generated vs reflection", "CLR advanced external-ref fixed reflection deserialize", "CLR advanced external-ref fixed generated deserialize");
+    PrintComparison(results, "CLR advanced external-ref fixed serialize: generated vs reflection", "CLR advanced external-ref fixed reflection serialize", "CLR advanced external-ref fixed generated serialize");
+    PrintComparison(results, "CLR advanced polymorphic serialize: generated vs reflection", "CLR advanced polymorphic reflection serialize", "CLR advanced polymorphic generated serialize");
+    PrintComparison(results, "CLR advanced polymorphic deserialize: generated vs reflection", "CLR advanced polymorphic reflection deserialize", "CLR advanced polymorphic generated deserialize");
     Console.WriteLine();
 }
 
@@ -954,6 +1130,106 @@ static BJsonValue CreateAttributedPayloadWithoutDefaults()
     return BJsonValue.Create(obj);
 }
 
+static AdvancedReflectionProfile CreateAdvancedReflectionProfile()
+{
+    return new AdvancedReflectionProfile
+    {
+        Id = 11,
+        Tag = "delta",
+        AuditTrail = "evt",
+        Mode = "boost",
+        Segment = "north"
+    };
+}
+
+static AdvancedGeneratedProfile CreateAdvancedGeneratedProfile()
+{
+    return new AdvancedGeneratedProfile
+    {
+        Id = 11,
+        Tag = "delta",
+        AuditTrail = "evt",
+        Mode = "boost",
+        Segment = "north"
+    };
+}
+
+static ReflectionActorBase CreateReflectionPolymorphicActor()
+{
+    return new ReflectionMage
+    {
+        Id = 5,
+        Alias = "rune",
+        Mana = 120
+    };
+}
+
+static GeneratedActorBase CreateGeneratedPolymorphicActor()
+{
+    return new GeneratedMage
+    {
+        Id = 5,
+        Alias = "rune",
+        Mana = 120
+    };
+}
+
+static BJsonValue CreateAdvancedExternalStateDocument()
+{
+    return BJsonValue.Create(new BJsonObject
+    {
+        ["Power"] = BJsonValue.Create(17),
+        ["Flags"] = BJsonValue.Create("steady")
+    });
+}
+
+static BJsonValue CreateAdvancedPreprocessorPayload(string externalStatePath)
+{
+    return BJsonValue.Create(new BJsonObject
+    {
+        ["$branches"] = BJsonValue.Create(new BJsonArray
+        {
+            BJsonValue.Create(new BJsonObject
+            {
+                ["$if"] = BJsonValue.Create(new BJsonObject
+                {
+                    ["$var"] = BJsonValue.Create("Platform"),
+                    ["$eq"] = BJsonValue.Create("Desktop")
+                }),
+                ["$then"] = BJsonValue.Create(new BJsonObject
+                {
+                    ["PrimaryColor"] = BJsonValue.Create("#22CC88"),
+                    ["Display"] = BJsonValue.Create(new BJsonObject
+                    {
+                        ["$ref"] = BJsonValue.Create("primaryColor")
+                    }),
+                    ["Mode"] = BJsonValue.Create("{{ModeToken}}"),
+                    ["State"] = BJsonValue.Create(externalStatePath),
+                    ["AuditTrail"] = BJsonValue.Create("evt")
+                })
+            }),
+            BJsonValue.Create(new BJsonObject
+            {
+                ["$else"] = BJsonValue.Create(new BJsonObject
+                {
+                    ["PrimaryColor"] = BJsonValue.Create("#999999"),
+                    ["Display"] = BJsonValue.Create("fallback"),
+                    ["Mode"] = BJsonValue.Create("safe"),
+                    ["AuditTrail"] = BJsonValue.Create("evt")
+                })
+            })
+        })
+    });
+}
+
+static BJsonValue CreateAdvancedExternalFixedPathPayload()
+{
+    return BJsonValue.Create(new BJsonObject
+    {
+        ["State"] = BJsonValue.Create("ignored-on-fixed-path")
+    });
+}
+
 static class BenchmarkStore
 {
     public static readonly Dictionary<string, (string Name, int Iterations, int PayloadSize, TimeSpan Elapsed, long AllocatedBytes, double ThroughputOpsPerSecond, double BytesPerOp)> Results =
@@ -1054,4 +1330,206 @@ sealed class AttributedGeneratedProfile
     {
         return "standard";
     }
+}
+
+[BJsonPreprocessor]
+sealed class AdvancedReflectionConfig
+{
+    [BJsonAnchor("primaryColor")]
+    public string PrimaryColor { get; set; } = string.Empty;
+
+    public string Display { get; set; } = string.Empty;
+
+    [BJsonValueMapper(nameof(MapMode))]
+    public string Mode { get; set; } = string.Empty;
+
+    [BJsonIgnoreWhen(nameof(ShouldIgnoreAudit))]
+    public string AuditTrail { get; set; } = string.Empty;
+
+    [BJsonDefaultProvider(nameof(CreateDefaultSegment))]
+    public string Segment { get; set; } = string.Empty;
+
+    [BJsonExternalRef(Optional = true)]
+    public AdvancedExternalState? State { get; set; }
+
+    internal static bool ShouldIgnoreAudit(object? value, string propertyName, IComparable? version)
+    {
+        return false;
+    }
+
+    internal static BJsonValue MapMode(BJsonValue value, string propertyName, IComparable? version, bool isReading)
+    {
+        if (!value.TryGetString(out var text))
+            return value;
+
+        return BJsonValue.Create(isReading ? text.ToLowerInvariant() : text.ToUpperInvariant());
+    }
+
+    internal static string CreateDefaultSegment()
+    {
+        return "core";
+    }
+}
+
+[BJsonSerializable]
+[BJsonPreprocessor]
+sealed class AdvancedGeneratedConfig
+{
+    [BJsonAnchor("primaryColor")]
+    public string PrimaryColor { get; set; } = string.Empty;
+
+    public string Display { get; set; } = string.Empty;
+
+    [BJsonValueMapper(nameof(MapMode))]
+    public string Mode { get; set; } = string.Empty;
+
+    [BJsonIgnoreWhen(nameof(ShouldIgnoreAudit))]
+    public string AuditTrail { get; set; } = string.Empty;
+
+    [BJsonDefaultProvider(nameof(CreateDefaultSegment))]
+    public string Segment { get; set; } = string.Empty;
+
+    [BJsonExternalRef(Optional = true)]
+    public AdvancedExternalState? State { get; set; }
+
+    internal static bool ShouldIgnoreAudit(object? value, string propertyName, IComparable? version)
+    {
+        return false;
+    }
+
+    internal static BJsonValue MapMode(BJsonValue value, string propertyName, IComparable? version, bool isReading)
+    {
+        if (!value.TryGetString(out var text))
+            return value;
+
+        return BJsonValue.Create(isReading ? text.ToLowerInvariant() : text.ToUpperInvariant());
+    }
+
+    internal static string CreateDefaultSegment()
+    {
+        return "core";
+    }
+}
+
+sealed class AdvancedExternalState
+{
+    public int Power { get; set; }
+
+    public string Flags { get; set; } = string.Empty;
+}
+
+[BJsonPreprocessor]
+sealed class AdvancedReflectionExternalRefConfig
+{
+    [BJsonExternalRef(FixedPath = "state-fixed.bjson")]
+    public AdvancedExternalState? State { get; set; }
+}
+
+[BJsonSerializable]
+[BJsonPreprocessor]
+sealed class AdvancedGeneratedExternalRefConfig
+{
+    [BJsonExternalRef(FixedPath = "state-fixed.bjson")]
+    public AdvancedExternalState? State { get; set; }
+}
+
+sealed class AdvancedReflectionProfile
+{
+    public int Id { get; set; }
+
+    [BJsonValueMapper(nameof(MapTag))]
+    public string Tag { get; set; } = string.Empty;
+
+    [BJsonIgnoreWhen(nameof(NeverIgnore))]
+    public string AuditTrail { get; set; } = string.Empty;
+
+    [BJsonDefaultProvider(nameof(CreateDefaultMode))]
+    public string Mode { get; set; } = string.Empty;
+
+    [BJsonDefaultValue("core")]
+    public string Segment { get; set; } = string.Empty;
+
+    internal static bool NeverIgnore(object? value, string propertyName, IComparable? version)
+    {
+        return false;
+    }
+
+    internal static BJsonValue MapTag(BJsonValue value, string propertyName, IComparable? version, bool isReading)
+    {
+        if (!value.TryGetString(out var text))
+            return value;
+
+        return BJsonValue.Create(isReading ? text.ToLowerInvariant() : text.ToUpperInvariant());
+    }
+
+    internal static string CreateDefaultMode()
+    {
+        return "standard";
+    }
+}
+
+[BJsonSerializable]
+sealed class AdvancedGeneratedProfile
+{
+    public int Id { get; set; }
+
+    [BJsonValueMapper(nameof(MapTag))]
+    public string Tag { get; set; } = string.Empty;
+
+    [BJsonIgnoreWhen(nameof(NeverIgnore))]
+    public string AuditTrail { get; set; } = string.Empty;
+
+    [BJsonDefaultProvider(nameof(CreateDefaultMode))]
+    public string Mode { get; set; } = string.Empty;
+
+    [BJsonDefaultValue("core")]
+    public string Segment { get; set; } = string.Empty;
+
+    internal static bool NeverIgnore(object? value, string propertyName, IComparable? version)
+    {
+        return false;
+    }
+
+    internal static BJsonValue MapTag(BJsonValue value, string propertyName, IComparable? version, bool isReading)
+    {
+        if (!value.TryGetString(out var text))
+            return value;
+
+        return BJsonValue.Create(isReading ? text.ToLowerInvariant() : text.ToUpperInvariant());
+    }
+
+    internal static string CreateDefaultMode()
+    {
+        return "standard";
+    }
+}
+
+[BJsonPolymorphic(TypeDiscriminatorPropertyName = "$kind")]
+[BJsonDerivedType(typeof(ReflectionMage), TypeDiscriminator = "mage")]
+abstract class ReflectionActorBase
+{
+    public int Id { get; set; }
+
+    public string Alias { get; set; } = string.Empty;
+}
+
+sealed class ReflectionMage : ReflectionActorBase
+{
+    public int Mana { get; set; }
+}
+
+[BJsonSerializable]
+[BJsonPolymorphic(TypeDiscriminatorPropertyName = "$kind")]
+[BJsonDerivedType(typeof(GeneratedMage), TypeDiscriminator = "mage")]
+abstract class GeneratedActorBase
+{
+    public int Id { get; set; }
+
+    public string Alias { get; set; } = string.Empty;
+}
+
+[BJsonSerializable]
+sealed class GeneratedMage : GeneratedActorBase
+{
+    public int Mana { get; set; }
 }

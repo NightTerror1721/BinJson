@@ -9,11 +9,13 @@ namespace Krampus.BinJson.Serialization
     public sealed class BJsonConverterRegistry
     {
         private readonly Dictionary<Type, IBJsonConverter> _converters;
+        private readonly List<IBJsonConverterFactory> _factories;
         private readonly Dictionary<Type, IBJsonConverter?> _resolutionCache;
 
         public BJsonConverterRegistry()
         {
             _converters = new Dictionary<Type, IBJsonConverter>();
+            _factories = new List<IBJsonConverterFactory>();
             _resolutionCache = new Dictionary<Type, IBJsonConverter?>();
         }
 
@@ -33,6 +35,24 @@ namespace Krampus.BinJson.Serialization
 
             foreach (var converter in converters)
                 Add(converter);
+        }
+
+        public void AddFactory(IBJsonConverterFactory factory)
+        {
+            if (factory is null)
+                throw new BJsonValidationException("Parameter 'factory' cannot be null.");
+
+            _factories.Add(factory);
+            _resolutionCache.Clear();
+        }
+
+        public void AddFactories(IEnumerable<IBJsonConverterFactory> factories)
+        {
+            if (factories is null)
+                throw new BJsonValidationException("Parameter 'factories' cannot be null.");
+
+            foreach (var factory in factories)
+                AddFactory(factory);
         }
 
         public bool TryGetConverter(Type type, out IBJsonConverter converter)
@@ -69,6 +89,20 @@ namespace Krampus.BinJson.Serialization
                     _resolutionCache[type] = converter;
                     return true;
                 }
+            }
+
+            foreach (var factory in _factories)
+            {
+                if (!factory.CanConvert(type))
+                    continue;
+
+                var created = factory.CreateConverter(type);
+                if (created is null)
+                    continue;
+
+                _resolutionCache[type] = created;
+                converter = created;
+                return true;
             }
 
             converter = null!;

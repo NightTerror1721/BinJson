@@ -70,6 +70,14 @@ Binary format v1.0 uses `BinaryFormatError` for issues such as:
 
 - `Unknown`
 
+### Preprocessor and External Reference Codes
+
+- `PreprocessorPipelineError`
+- `ExternalReferencePathError`
+- `ExternalReferenceReadError`
+- `ExternalReferenceWriteError`
+- `ExternalReferenceSecurityViolation`
+
 ## Specialized Exception Metadata
 
 Some exception types include additional typed fields:

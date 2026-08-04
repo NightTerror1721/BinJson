@@ -12,8 +12,10 @@ namespace Krampus.BinJson.Serialization
     /// <para>
     /// The referenced method must match one of the following signatures:
     /// <code>
-    /// static T      MethodName()          // strongly typed — preferred
-    /// static object? MethodName()         // loosely typed — fallback
+    /// static T       MethodName()                 // strongly typed — preferred
+    /// static object? MethodName()                // loosely typed — fallback
+    /// static T       MethodName(IComparable?)    // version-aware
+    /// static object? MethodName(IComparable?)    // version-aware fallback
     /// </code>
     /// </para>
     /// <para>
@@ -32,12 +34,17 @@ namespace Krampus.BinJson.Serialization
     /// [BJsonDefaultProvider(nameof(GetDefaultStats))]
     /// public Stats PlayerStats { get; set; }
     ///
-    /// private static Stats GetDefaultStats() => new Stats { Level = 1, Hp = 100 };
+    /// internal static Stats GetDefaultStats() => new Stats { Level = 1, Hp = 100 };
     ///
     /// // Composing with versioning:
     /// [BJsonVersion(typeof(Version), introducedIn: "2.0.0")]
     /// [BJsonDefaultProvider(nameof(GetDefaultProfile))]
     /// public Profile Profile { get; set; }
+    ///
+    /// internal static Profile GetDefaultProfile(IComparable? version)
+    ///     => version != null &amp;&amp; version.CompareTo(new Version("3.0.0")) &gt;= 0
+    ///        ? new Profile { Mode = "modern" }
+    ///        : new Profile { Mode = "legacy" };
     /// </code>
     /// </example>
     [AttributeUsage(AttributeTargets.Property | AttributeTargets.Field, AllowMultiple = false)]
@@ -54,8 +61,7 @@ namespace Krampus.BinJson.Serialization
 
         /// <summary>
         /// Name of the static method on the declaring type that returns the default value.
-        /// The method must have a parameterless signature: <c>static T MethodName()</c>
-        /// or <c>static object? MethodName()</c>.
+        /// The method may be parameterless or version-aware as documented on this attribute.
         /// </summary>
         public string MethodName { get; }
     }

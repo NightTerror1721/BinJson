@@ -26,6 +26,8 @@ namespace Krampus.BinJson.Serialization
 
         public int CurrentDepth => _objectStack.Count;
 
+        internal BJsonObjectSerializer Serializer => _serializer;
+
         public BJsonValue Serialize(object? value)
         {
             return _serializer.SerializeValue(value, value?.GetType() ?? typeof(object));

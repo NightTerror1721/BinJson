@@ -12,13 +12,13 @@ namespace Krampus.BinJson.Serialization
     /// The referenced method must match one of the following signatures (preferred first):
     /// <code>
     /// // Full signature — receives direction flag
-    /// static object? MethodName(object? value, string propertyName, IComparable? version, bool isReading)
+    /// static BJsonValue MethodName(BJsonValue value, string propertyName, IComparable? version, bool isReading)
     ///
-    /// // Fallback signature — no direction flag
-    /// static object? MethodName(object? value, string propertyName, IComparable? version)
+    /// // Runtime-only fallback signature — no extra context
+    /// static BJsonValue MethodName(BJsonValue value)
     /// </code>
-    /// The method receives the raw value before serialization or after deserialization and must
-    /// return the transformed value. Returning <c>null</c> is valid.
+    /// The method receives the member value in BJson form before serialization or after
+    /// deserialization and must return the transformed <see cref="BJsonValue"/>.
     /// </para>
     /// <para>
     /// The <c>version</c> parameter receives the current document version set by
@@ -28,16 +28,19 @@ namespace Krampus.BinJson.Serialization
     /// The <c>isReading</c> parameter is <c>true</c> during deserialization and <c>false</c>
     /// during serialization, allowing a single method to handle both directions.
     /// </para>
+    /// <para>
+    /// Source-generated serializers require the full 4-parameter signature.
+    /// </para>
     /// </summary>
     /// <example>
     /// <code>
     /// [BJsonValueMapper(nameof(MapScore))]
     /// public int Score { get; set; }
     ///
-    /// private static object? MapScore(object? value, string propertyName, IComparable? version, bool isReading)
+    /// internal static BJsonValue MapScore(BJsonValue value, string propertyName, IComparable? version, bool isReading)
     /// {
     ///     if (isReading &amp;&amp; version != null &amp;&amp; version.CompareTo(new Version("2.0")) &lt; 0)
-    ///         return (int)value! * 10; // legacy scale factor
+    ///         return BJsonValue.Create(value.IntValue * 10); // legacy scale factor
     ///     return value;
     /// }
     /// </code>

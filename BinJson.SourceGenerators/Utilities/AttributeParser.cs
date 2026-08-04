@@ -29,6 +29,13 @@ namespace Krampus.BinJson.SourceGenerators.Utilities
         private const string BJsonValueMapperAttributeName = "Krampus.BinJson.Serialization.BJsonValueMapperAttribute";
         private const string BJsonDefaultValueAttributeName = "Krampus.BinJson.Serialization.BJsonDefaultValueAttribute";
         private const string BJsonDefaultProviderAttributeName = "Krampus.BinJson.Serialization.BJsonDefaultProviderAttribute";
+        private const string BJsonAliasAttributeName = "Krampus.BinJson.Serialization.BJsonAliasAttribute";
+        private const string BJsonRequiredWhenAttributeName = "Krampus.BinJson.Serialization.BJsonRequiredWhenAttribute";
+        private const string BJsonNumberHandlingAttributeName = "Krampus.BinJson.Serialization.BJsonNumberHandlingAttribute";
+        private const string BJsonConverterFactoryAttributeName = "Krampus.BinJson.Serialization.BJsonConverterFactoryAttribute";
+        private const string BJsonDiscriminatorValueAttributeName = "Krampus.BinJson.Serialization.BJsonDiscriminatorValueAttribute";
+        private const string BJsonOnSerializingAttributeName = "Krampus.BinJson.Serialization.BJsonOnSerializingAttribute";
+        private const string BJsonOnDeserializedAttributeName = "Krampus.BinJson.Serialization.BJsonOnDeserializedAttribute";
         private const string BJsonVersionAttributeName = "Krampus.BinJson.Serialization.BJsonVersionAttribute";
         private const string BJsonVersionContextAttributeName = "Krampus.BinJson.Serialization.BJsonVersionContextAttribute";
         private const string BJsonExternalRefAttributeName = "Krampus.BinJson.Serialization.BJsonExternalRefAttribute";
@@ -55,6 +62,13 @@ namespace Krampus.BinJson.SourceGenerators.Utilities
                 BJsonValueMapperAttribute = compilation.GetTypeByMetadataName(BJsonValueMapperAttributeName);
                 BJsonDefaultValueAttribute = compilation.GetTypeByMetadataName(BJsonDefaultValueAttributeName);
                 BJsonDefaultProviderAttribute = compilation.GetTypeByMetadataName(BJsonDefaultProviderAttributeName);
+                BJsonAliasAttribute = compilation.GetTypeByMetadataName(BJsonAliasAttributeName);
+                BJsonRequiredWhenAttribute = compilation.GetTypeByMetadataName(BJsonRequiredWhenAttributeName);
+                BJsonNumberHandlingAttribute = compilation.GetTypeByMetadataName(BJsonNumberHandlingAttributeName);
+                BJsonConverterFactoryAttribute = compilation.GetTypeByMetadataName(BJsonConverterFactoryAttributeName);
+                BJsonDiscriminatorValueAttribute = compilation.GetTypeByMetadataName(BJsonDiscriminatorValueAttributeName);
+                BJsonOnSerializingAttribute = compilation.GetTypeByMetadataName(BJsonOnSerializingAttributeName);
+                BJsonOnDeserializedAttribute = compilation.GetTypeByMetadataName(BJsonOnDeserializedAttributeName);
                 BJsonVersionAttribute = compilation.GetTypeByMetadataName(BJsonVersionAttributeName);
                 BJsonVersionContextAttribute = compilation.GetTypeByMetadataName(BJsonVersionContextAttributeName);
                 BJsonExternalRefAttribute = compilation.GetTypeByMetadataName(BJsonExternalRefAttributeName);
@@ -63,6 +77,8 @@ namespace Krampus.BinJson.SourceGenerators.Utilities
                 BJsonFactoryMethodAttribute = compilation.GetTypeByMetadataName(BJsonFactoryMethodAttributeName);
                 BJsonValueType = compilation.GetTypeByMetadataName("Krampus.BinJson.BJsonValue");
                 IComparableType = compilation.GetTypeByMetadataName("System.IComparable");
+                BJsonSerializationContextType = compilation.GetTypeByMetadataName("Krampus.BinJson.Serialization.BJsonSerializationContext");
+                BJsonDeserializationContextType = compilation.GetTypeByMetadataName("Krampus.BinJson.Serialization.BJsonDeserializationContext");
             }
 
             public INamedTypeSymbol? BJsonSerializableAttribute { get; }
@@ -80,6 +96,13 @@ namespace Krampus.BinJson.SourceGenerators.Utilities
             public INamedTypeSymbol? BJsonValueMapperAttribute { get; }
             public INamedTypeSymbol? BJsonDefaultValueAttribute { get; }
             public INamedTypeSymbol? BJsonDefaultProviderAttribute { get; }
+            public INamedTypeSymbol? BJsonAliasAttribute { get; }
+            public INamedTypeSymbol? BJsonRequiredWhenAttribute { get; }
+            public INamedTypeSymbol? BJsonNumberHandlingAttribute { get; }
+            public INamedTypeSymbol? BJsonConverterFactoryAttribute { get; }
+            public INamedTypeSymbol? BJsonDiscriminatorValueAttribute { get; }
+            public INamedTypeSymbol? BJsonOnSerializingAttribute { get; }
+            public INamedTypeSymbol? BJsonOnDeserializedAttribute { get; }
             public INamedTypeSymbol? BJsonVersionAttribute { get; }
             public INamedTypeSymbol? BJsonVersionContextAttribute { get; }
             public INamedTypeSymbol? BJsonExternalRefAttribute { get; }
@@ -88,12 +111,14 @@ namespace Krampus.BinJson.SourceGenerators.Utilities
             public INamedTypeSymbol? BJsonFactoryMethodAttribute { get; }
             public INamedTypeSymbol? BJsonValueType { get; }
             public INamedTypeSymbol? IComparableType { get; }
+            public INamedTypeSymbol? BJsonSerializationContextType { get; }
+            public INamedTypeSymbol? BJsonDeserializationContextType { get; }
         }
 
         /// <summary>
         /// Parse [BJsonSerializable] attribute from a type symbol
         /// </summary>
-        public static TypeConfiguration? ParseTypeConfiguration(INamedTypeSymbol typeSymbol, AttributeSymbols symbols)
+        public static TypeConfiguration? ParseTypeConfiguration(INamedTypeSymbol typeSymbol, AttributeSymbols symbols, List<Diagnostic> diagnostics)
         {
             var attribute = GetAttribute(typeSymbol, symbols.BJsonSerializableAttribute, BJsonSerializableAttributeName);
             if (attribute == null)
@@ -112,7 +137,18 @@ namespace Krampus.BinJson.SourceGenerators.Utilities
             var converterAttr = GetAttribute(typeSymbol, symbols.BJsonConverterAttribute, BJsonConverterAttributeName);
             if (converterAttr != null)
             {
-                config.CustomConverterType = GetConstructorArgument<INamedTypeSymbol>(converterAttr, 0)?.ToDisplayString();
+                var converterType = GetConstructorArgument<INamedTypeSymbol>(converterAttr, 0);
+                if (converterType == null || converterType.TypeKind == TypeKind.Error)
+                {
+                    diagnostics.Add(Diagnostic.Create(
+                        BJsonDiagnostics.ConverterTypeNotFound,
+                        typeSymbol.Locations.FirstOrDefault() ?? Location.None,
+                        converterAttr.ConstructorArguments.FirstOrDefault().Value?.ToString() ?? "<unknown>"));
+                }
+                else
+                {
+                    config.CustomConverterType = converterType.ToDisplayString();
+                }
             }
 
             // Check for [BJsonPolymorphic]
@@ -122,6 +158,52 @@ namespace Krampus.BinJson.SourceGenerators.Utilities
                 config.IsPolymorphic = true;
                 config.TypeDiscriminatorPropertyName = GetNamedArgument<string>(polymorphicAttr, "TypeDiscriminatorPropertyName", "$type") ?? "$type";
             }
+            else if (typeSymbol.BaseType != null)
+            {
+                var basePolymorphicAttr = GetAttribute(typeSymbol.BaseType, symbols.BJsonPolymorphicAttribute, BJsonPolymorphicAttributeName);
+                if (basePolymorphicAttr != null)
+                {
+                    config.InheritedPolymorphicDiscriminatorPropertyName =
+                        GetNamedArgument<string>(basePolymorphicAttr, "TypeDiscriminatorPropertyName", "$type") ?? "$type";
+
+                    var explicitDiscriminator = GetAttribute(typeSymbol, symbols.BJsonDiscriminatorValueAttribute, BJsonDiscriminatorValueAttributeName);
+                    config.InheritedPolymorphicDiscriminatorValue = explicitDiscriminator != null
+                        ? GetConstructorArgument<string>(explicitDiscriminator, 0)
+                        : null;
+
+                    foreach (var derivedAttr in typeSymbol.BaseType.GetAttributes()
+                                 .Where(a => IsAttribute(a, symbols.BJsonDerivedTypeAttribute, BJsonDerivedTypeAttributeName)))
+                    {
+                        var derivedType = GetConstructorArgument<INamedTypeSymbol>(derivedAttr, 0);
+                        if (derivedType == null)
+                            continue;
+
+                        if (!SymbolEqualityComparer.Default.Equals(derivedType, typeSymbol))
+                            continue;
+
+                        if (config.InheritedPolymorphicDiscriminatorValue == null)
+                        {
+                            config.InheritedPolymorphicDiscriminatorValue =
+                                GetNamedArgument<string>(derivedAttr, "TypeDiscriminator", null)
+                                ?? derivedType.ToDisplayString();
+                        }
+                        break;
+                    }
+
+                    if (config.InheritedPolymorphicDiscriminatorValue == null)
+                        config.InheritedPolymorphicDiscriminatorValue = typeSymbol.ToDisplayString();
+                }
+            }
+
+            config.HasOnSerializingHooks = typeSymbol.GetMembers()
+                .OfType<IMethodSymbol>()
+                .Any(m => IsAttributePresent(m, symbols.BJsonOnSerializingAttribute, BJsonOnSerializingAttributeName)
+                    && IsValidLifecycleHook(m, symbols.BJsonSerializationContextType, "Krampus.BinJson.Serialization.BJsonSerializationContext"));
+
+            config.HasOnDeserializedHooks = typeSymbol.GetMembers()
+                .OfType<IMethodSymbol>()
+                .Any(m => IsAttributePresent(m, symbols.BJsonOnDeserializedAttribute, BJsonOnDeserializedAttributeName)
+                    && IsValidLifecycleHook(m, symbols.BJsonDeserializationContextType, "Krampus.BinJson.Serialization.BJsonDeserializationContext"));
 
             // Parse [BJsonDerivedType] attributes (multiple)
             var derivedTypeAttrs = typeSymbol.GetAttributes()
@@ -156,6 +238,21 @@ namespace Krampus.BinJson.SourceGenerators.Utilities
                 }
             }
 
+            // Check for type-level [BJsonVersion]
+            var typeVersionAttr = GetAttribute(typeSymbol, symbols.BJsonVersionAttribute, BJsonVersionAttributeName);
+            if (typeVersionAttr != null)
+            {
+                var versionType = GetConstructorArgument<INamedTypeSymbol>(typeVersionAttr, 0);
+                if (versionType != null)
+                {
+                    config.TypeVersionRange = new VersionInfo(
+                        versionType.ToDisplayString(),
+                        GetConstructorArgument<string>(typeVersionAttr, 1),
+                        GetConstructorArgument<string>(typeVersionAttr, 2),
+                        renamedFrom: null);
+                }
+            }
+
             // Check for [BJsonPreprocessor]
             var preprocessorAttr = GetAttribute(typeSymbol, symbols.BJsonPreprocessorAttribute, BJsonPreprocessorAttributeName);
             if (preprocessorAttr != null)
@@ -166,11 +263,12 @@ namespace Krampus.BinJson.SourceGenerators.Utilities
                     ?? GetNamedArgumentTypeSymbol(preprocessorAttr, "PreprocessorType")?.ToDisplayString();
             }
 
-            // Check for [BJsonFactoryMethod] on any static method
-            var factoryMethod = FindFactoryMethod(typeSymbol, symbols);
+            // Check for [BJsonFactoryMethod]
+            var factoryMethod = FindFactoryMethod(typeSymbol, symbols, diagnostics);
             if (factoryMethod != null)
             {
                 config.FactoryMethodName = factoryMethod.Name;
+                config.FactoryMethodParameterMapping = ParseFactoryParameterMapping(typeSymbol, factoryMethod, symbols, diagnostics);
 
                 // Capture factory method parameters if any
                 if (factoryMethod.Parameters.Length > 0)
@@ -183,6 +281,13 @@ namespace Krampus.BinJson.SourceGenerators.Utilities
                             param.Type.ToDisplayString(),
                             param.Type.NullableAnnotation == Microsoft.CodeAnalysis.NullableAnnotation.Annotated,
                             param.Type.IsValueType);
+
+                        if (config.FactoryMethodParameterMapping != null
+                            && config.FactoryMethodParameterMapping.TryGetValue(param.Name, out var mappedJsonName)
+                            && !string.IsNullOrWhiteSpace(mappedJsonName))
+                        {
+                            paramModel.JsonName = mappedJsonName;
+                        }
 
                         config.FactoryMethodParameters.Add(paramModel);
                     }
@@ -225,7 +330,7 @@ namespace Krampus.BinJson.SourceGenerators.Utilities
             var ignoreAttr = GetAttribute(memberSymbol, symbols.BJsonIgnoreAttribute, BJsonIgnoreAttributeName);
             if (ignoreAttr != null)
             {
-                var condition = GetNamedArgument<int>(ignoreAttr, "Condition", 0);
+                var condition = GetNamedArgument<int>(ignoreAttr, "Condition", 1);
                 model.IgnoreCondition = (IgnoreCondition)condition;
             }
 
@@ -246,8 +351,35 @@ namespace Krampus.BinJson.SourceGenerators.Utilities
             if (converterAttr != null)
             {
                 var converterType = GetConstructorArgument<INamedTypeSymbol>(converterAttr, 0);
-                if (converterType != null)
+                if (converterType == null || converterType.TypeKind == TypeKind.Error)
+                {
+                    diagnostics.Add(Diagnostic.Create(
+                        BJsonDiagnostics.ConverterTypeNotFound,
+                        memberSymbol.Locations.FirstOrDefault() ?? Location.None,
+                        converterAttr.ConstructorArguments.FirstOrDefault().Value?.ToString() ?? "<unknown>"));
+                }
+                else
+                {
                     model.CustomConverterType = converterType.ToDisplayString();
+                }
+            }
+
+            // [BJsonConverterFactory]
+            var converterFactoryAttr = GetAttribute(memberSymbol, symbols.BJsonConverterFactoryAttribute, BJsonConverterFactoryAttributeName);
+            if (converterFactoryAttr != null)
+            {
+                var factoryType = GetConstructorArgument<INamedTypeSymbol>(converterFactoryAttr, 0);
+                if (factoryType == null || factoryType.TypeKind == TypeKind.Error)
+                {
+                    diagnostics.Add(Diagnostic.Create(
+                        BJsonDiagnostics.ConverterTypeNotFound,
+                        memberSymbol.Locations.FirstOrDefault() ?? Location.None,
+                        converterFactoryAttr.ConstructorArguments.FirstOrDefault().Value?.ToString() ?? "<unknown>"));
+                }
+                else
+                {
+                    model.CustomConverterFactoryType = factoryType.ToDisplayString();
+                }
             }
 
             // [BJsonIgnoreWhen]
@@ -258,12 +390,37 @@ namespace Krampus.BinJson.SourceGenerators.Utilities
                 ValidateIgnoreWhenMethod(memberSymbol, model.IgnoreWhenMethod, diagnostics, symbols);
             }
 
+            // [BJsonRequiredWhen]
+            var requiredWhenAttr = GetAttribute(memberSymbol, symbols.BJsonRequiredWhenAttribute, BJsonRequiredWhenAttributeName);
+            if (requiredWhenAttr != null)
+            {
+                model.RequiredWhenMethod = GetConstructorArgument<string>(requiredWhenAttr, 0);
+                model.RequiredWhenParameterCount = ValidateRequiredWhenMethod(memberSymbol, model.RequiredWhenMethod, diagnostics, symbols);
+            }
+
             // [BJsonValueMapper]
             var valueMapperAttr = GetAttribute(memberSymbol, symbols.BJsonValueMapperAttribute, BJsonValueMapperAttributeName);
             if (valueMapperAttr != null)
             {
                 model.ValueMapperMethod = GetConstructorArgument<string>(valueMapperAttr, 0);
                 ValidateValueMapperMethod(memberSymbol, model.ValueMapperMethod, diagnostics, symbols);
+            }
+
+            // [BJsonAlias] (multiple)
+            foreach (var aliasAttr in memberSymbol.GetAttributes().Where(a => IsAttribute(a, symbols.BJsonAliasAttribute, BJsonAliasAttributeName)))
+            {
+                var alias = GetConstructorArgument<string>(aliasAttr, 0);
+                if (!string.IsNullOrWhiteSpace(alias))
+                    model.Aliases.Add(alias!);
+            }
+
+            // [BJsonNumberHandling]
+            var numberHandlingAttr = GetAttribute(memberSymbol, symbols.BJsonNumberHandlingAttribute, BJsonNumberHandlingAttributeName);
+            if (numberHandlingAttr != null
+                && numberHandlingAttr.ConstructorArguments.Length > 0
+                && numberHandlingAttr.ConstructorArguments[0].Value is int enumValue)
+            {
+                model.NumberHandling = enumValue;
             }
 
             // [BJsonVersion]
@@ -312,14 +469,20 @@ namespace Krampus.BinJson.SourceGenerators.Utilities
                         var constantVal = defaultValueAttr.ConstructorArguments.Length > 0
                             ? defaultValueAttr.ConstructorArguments[0].Value
                             : null;
-                        model.DefaultValue = DefaultValueInfo.FromBoth(constantVal, providerMethod);
+                        var providerAcceptsVersion = ValidateDefaultProviderMethod(memberSymbol, providerMethod, diagnostics, symbols);
+                        model.DefaultValue = DefaultValueInfo.FromBoth(constantVal, providerMethod, providerAcceptsVersion);
+
+                        diagnostics.Add(Diagnostic.Create(
+                            BJsonDiagnostics.ConflictingDefaultAttributes,
+                            memberSymbol.Locations.FirstOrDefault() ?? Location.None,
+                            memberSymbol.Name,
+                            memberSymbol.ContainingType?.Name ?? "<unknown>"));
                     }
                     else
                     {
-                        model.DefaultValue = DefaultValueInfo.FromProvider(providerMethod);
+                        var providerAcceptsVersion = ValidateDefaultProviderMethod(memberSymbol, providerMethod, diagnostics, symbols);
+                        model.DefaultValue = DefaultValueInfo.FromProvider(providerMethod, providerAcceptsVersion);
                     }
-
-                    ValidateDefaultProviderMethod(memberSymbol, providerMethod, diagnostics);
                 }
             }
             else if (defaultValueAttr != null)
@@ -342,13 +505,134 @@ namespace Krampus.BinJson.SourceGenerators.Utilities
         /// <summary>
         /// Returns the static factory method marked with [BJsonFactoryMethod] on the type, if any.
         /// </summary>
-        public static IMethodSymbol? FindFactoryMethod(INamedTypeSymbol typeSymbol, AttributeSymbols symbols)
+        public static IMethodSymbol? FindFactoryMethod(INamedTypeSymbol typeSymbol, AttributeSymbols symbols, List<Diagnostic> diagnostics)
         {
-            return typeSymbol.GetMembers()
+            var methods = typeSymbol.GetMembers()
                 .OfType<IMethodSymbol>()
-                .FirstOrDefault(m => m.IsStatic
-                                     && m.MethodKind == MethodKind.Ordinary
-                                     && HasAttribute(m, symbols.BJsonFactoryMethodAttribute, BJsonFactoryMethodAttributeName));
+                .Where(m => m.MethodKind == MethodKind.Ordinary
+                            && HasAttribute(m, symbols.BJsonFactoryMethodAttribute, BJsonFactoryMethodAttributeName))
+                .ToList();
+
+            if (methods.Count == 0)
+                return null;
+
+            if (methods.Count > 1)
+            {
+                foreach (var method in methods.Skip(1))
+                {
+                    diagnostics.Add(Diagnostic.Create(
+                        BJsonDiagnostics.MultipleFactoryMethods,
+                        method.Locations.FirstOrDefault() ?? Location.None,
+                        typeSymbol.Name));
+                }
+            }
+
+            var selected = methods[0];
+            if (!IsValidFactoryMethod(typeSymbol, selected))
+            {
+                diagnostics.Add(Diagnostic.Create(
+                    BJsonDiagnostics.InvalidFactoryMethodSignature,
+                    selected.Locations.FirstOrDefault() ?? Location.None,
+                    selected.Name,
+                    typeSymbol.Name));
+                return null;
+            }
+
+            return selected;
+        }
+
+        private static bool IsValidFactoryMethod(INamedTypeSymbol declaringType, IMethodSymbol method)
+        {
+            if (!method.IsStatic || method.IsGenericMethod)
+                return false;
+
+            if (method.ReturnType is not INamedTypeSymbol returnType)
+                return false;
+
+            if (!IsSameOrDerived(returnType, declaringType))
+                return false;
+
+            foreach (var parameter in method.Parameters)
+            {
+                if (parameter.RefKind != RefKind.None)
+                    return false;
+            }
+
+            return true;
+        }
+
+        private static bool IsSameOrDerived(INamedTypeSymbol candidate, INamedTypeSymbol baseType)
+        {
+            var current = candidate;
+            while (current != null)
+            {
+                if (SymbolEqualityComparer.Default.Equals(current, baseType))
+                    return true;
+
+                current = current.BaseType;
+            }
+
+            return false;
+        }
+
+        private static Dictionary<string, string>? ParseFactoryParameterMapping(
+            INamedTypeSymbol typeSymbol,
+            IMethodSymbol factoryMethod,
+            AttributeSymbols symbols,
+            List<Diagnostic> diagnostics)
+        {
+            var attribute = GetAttribute(factoryMethod, symbols.BJsonFactoryMethodAttribute, BJsonFactoryMethodAttributeName);
+            if (attribute == null)
+                return null;
+
+            var namedArg = attribute.NamedArguments.FirstOrDefault(kvp => kvp.Key == "ParameterMapping");
+            if (namedArg.Equals(default(KeyValuePair<string, TypedConstant>)))
+                return null;
+
+            var mappingArray = namedArg.Value;
+            if (mappingArray.Kind != TypedConstantKind.Array)
+                return null;
+
+            var items = mappingArray.Values.Select(v => v.Value as string).ToList();
+            if (items.Count == 0)
+                return null;
+
+            if ((items.Count % 2) != 0 || items.Any(s => string.IsNullOrWhiteSpace(s)))
+            {
+                diagnostics.Add(Diagnostic.Create(
+                    BJsonDiagnostics.InvalidFactoryParameterMapping,
+                    factoryMethod.Locations.FirstOrDefault() ?? Location.None,
+                    factoryMethod.Name,
+                    typeSymbol.Name));
+                return null;
+            }
+
+            var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var parameterNames = new HashSet<string>(factoryMethod.Parameters.Select(p => p.Name), StringComparer.OrdinalIgnoreCase);
+            var seenParameters = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var seenJsonKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            for (int i = 0; i < items.Count; i += 2)
+            {
+                var parameterName = items[i]!;
+                var jsonKey = items[i + 1]!;
+
+                if (!parameterNames.Contains(parameterName)
+                    || !seenParameters.Add(parameterName)
+                    || !seenJsonKeys.Add(jsonKey))
+                {
+                    diagnostics.Add(Diagnostic.Create(
+                        BJsonDiagnostics.InvalidFactoryParameterReference,
+                        factoryMethod.Locations.FirstOrDefault() ?? Location.None,
+                        factoryMethod.Name,
+                        typeSymbol.Name,
+                        parameterName));
+                    continue;
+                }
+
+                map[parameterName] = jsonKey;
+            }
+
+            return map.Count > 0 ? map : null;
         }
 
         private static void ValidateIgnoreWhenMethod(ISymbol memberSymbol, string? methodName, List<Diagnostic> diagnostics, AttributeSymbols symbols)
@@ -398,18 +682,63 @@ namespace Krampus.BinJson.SourceGenerators.Utilities
                 });
         }
 
-        private static void ValidateDefaultProviderMethod(ISymbol memberSymbol, string? methodName, List<Diagnostic> diagnostics)
+        private static int ValidateRequiredWhenMethod(ISymbol memberSymbol, string? methodName, List<Diagnostic> diagnostics, AttributeSymbols symbols)
         {
-            ValidateReferencedMethod(
+            var method = ValidateReferencedMethod(
+                memberSymbol,
+                methodName,
+                "BJsonRequiredWhen",
+                diagnostics,
+                expectedSignature: "static bool Method() or static bool Method(IComparable? version) or static bool Method(string memberName, IComparable? version)",
+                isValidSignature: method =>
+                {
+                    if (!method.IsStatic || method.ReturnType.SpecialType != SpecialType.System_Boolean)
+                        return false;
+
+                    if (method.Parameters.Length == 0)
+                        return true;
+
+                    if (method.Parameters.Length == 1)
+                        return IsComparable(method.Parameters[0].Type, symbols.IComparableType);
+
+                    if (method.Parameters.Length == 2)
+                    {
+                        return method.Parameters[0].Type.SpecialType == SpecialType.System_String
+                            && IsComparable(method.Parameters[1].Type, symbols.IComparableType);
+                    }
+
+                    return false;
+                });
+
+            return method?.Parameters.Length ?? 0;
+        }
+
+        private static bool ValidateDefaultProviderMethod(ISymbol memberSymbol, string? methodName, List<Diagnostic> diagnostics, AttributeSymbols symbols)
+        {
+            var method = ValidateReferencedMethod(
                 memberSymbol,
                 methodName,
                 "BJsonDefaultProvider",
                 diagnostics,
-                expectedSignature: "static T Method()",
-                isValidSignature: method => method.IsStatic && method.Parameters.Length == 0 && method.ReturnsVoid == false);
+                expectedSignature: "static T Method() or static T Method(IComparable? version)",
+                isValidSignature: method =>
+                {
+                    if (!method.IsStatic || method.ReturnsVoid)
+                        return false;
+
+                    if (method.Parameters.Length == 0)
+                        return true;
+
+                    if (method.Parameters.Length != 1)
+                        return false;
+
+                    return IsComparable(method.Parameters[0].Type, symbols.IComparableType);
+                });
+
+            return method != null && method.Parameters.Length == 1;
         }
 
-        private static void ValidateReferencedMethod(
+        private static IMethodSymbol? ValidateReferencedMethod(
             ISymbol memberSymbol,
             string? methodName,
             string attributeName,
@@ -418,7 +747,7 @@ namespace Krampus.BinJson.SourceGenerators.Utilities
             Func<IMethodSymbol, bool> isValidSignature)
         {
             if (string.IsNullOrWhiteSpace(methodName) || memberSymbol.ContainingType is null)
-                return;
+                return null;
 
             string mappedMethodName = methodName!;
 
@@ -435,7 +764,7 @@ namespace Krampus.BinJson.SourceGenerators.Utilities
                     methodName,
                     attributeName,
                     memberSymbol.ContainingType.Name));
-                return;
+                return null;
             }
 
             var validMethod = methods.FirstOrDefault(isValidSignature);
@@ -448,7 +777,7 @@ namespace Krampus.BinJson.SourceGenerators.Utilities
                     attributeName,
                     memberSymbol.ContainingType.Name,
                     expectedSignature));
-                return;
+                return null;
             }
 
             if (!IsAccessibleFromGeneratedCode(validMethod))
@@ -460,6 +789,31 @@ namespace Krampus.BinJson.SourceGenerators.Utilities
                     attributeName,
                     memberSymbol.ContainingType.Name));
             }
+
+            return validMethod;
+        }
+
+        private static bool IsAttributePresent(ISymbol symbol, INamedTypeSymbol? attributeSymbol, string attributeFullName)
+        {
+            return symbol.GetAttributes().Any(a => IsAttribute(a, attributeSymbol, attributeFullName));
+        }
+
+        private static bool IsValidLifecycleHook(IMethodSymbol method, INamedTypeSymbol? expectedContextType, string expectedContextTypeName)
+        {
+            if (method.ReturnsVoid is false || method.IsStatic)
+                return false;
+
+            if (method.Parameters.Length == 0)
+                return true;
+
+            if (method.Parameters.Length != 1)
+                return false;
+
+            var parameterType = method.Parameters[0].Type;
+            if (expectedContextType != null)
+                return SymbolEqualityComparer.Default.Equals(parameterType, expectedContextType);
+
+            return string.Equals(parameterType.ToDisplayString(), expectedContextTypeName, StringComparison.Ordinal);
         }
 
         private static bool IsAccessibleFromGeneratedCode(IMethodSymbol method)

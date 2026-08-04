@@ -100,5 +100,50 @@ namespace Krampus.BinJson.SourceGenerators
             category: Category,
             defaultSeverity: DiagnosticSeverity.Warning,
             isEnabledByDefault: true);
+
+        // BJSON012: Invalid [BJsonFactoryMethod(ParameterMapping=...)] declaration
+        public static readonly DiagnosticDescriptor InvalidFactoryParameterMapping = new DiagnosticDescriptor(
+            id: "BJSON012",
+            title: "Invalid factory parameter mapping",
+            messageFormat: "Factory method '{0}' on type '{1}' has invalid ParameterMapping. Expected alternating ['paramName', 'jsonKey'] pairs with non-empty values.",
+            category: Category,
+            defaultSeverity: DiagnosticSeverity.Warning,
+            isEnabledByDefault: true);
+
+        // BJSON013: Both [BJsonDefaultValue] and [BJsonDefaultProvider] are present on the same member
+        public static readonly DiagnosticDescriptor ConflictingDefaultAttributes = new DiagnosticDescriptor(
+            id: "BJSON013",
+            title: "Conflicting default value attributes",
+            messageFormat: "Member '{0}' in type '{1}' declares both [BJsonDefaultValue] and [BJsonDefaultProvider]. The provider takes precedence.",
+            category: Category,
+            defaultSeverity: DiagnosticSeverity.Warning,
+            isEnabledByDefault: true);
+
+        // BJSON014: Multiple [BJsonFactoryMethod] methods in the same type
+        public static readonly DiagnosticDescriptor MultipleFactoryMethods = new DiagnosticDescriptor(
+            id: "BJSON014",
+            title: "Multiple factory methods marked with [BJsonFactoryMethod]",
+            messageFormat: "Type '{0}' has multiple methods marked with [BJsonFactoryMethod]. Only one is allowed.",
+            category: Category,
+            defaultSeverity: DiagnosticSeverity.Error,
+            isEnabledByDefault: true);
+
+        // BJSON015: Invalid [BJsonFactoryMethod] signature or return type
+        public static readonly DiagnosticDescriptor InvalidFactoryMethodSignature = new DiagnosticDescriptor(
+            id: "BJSON015",
+            title: "Invalid factory method signature",
+            messageFormat: "Factory method '{0}' on type '{1}' is invalid for [BJsonFactoryMethod]",
+            category: Category,
+            defaultSeverity: DiagnosticSeverity.Error,
+            isEnabledByDefault: true);
+
+        // BJSON016: Factory ParameterMapping references unknown/duplicate parameter names or duplicate JSON keys
+        public static readonly DiagnosticDescriptor InvalidFactoryParameterReference = new DiagnosticDescriptor(
+            id: "BJSON016",
+            title: "Invalid factory parameter mapping target",
+            messageFormat: "Factory method '{0}' on type '{1}' has invalid ParameterMapping target '{2}'",
+            category: Category,
+            defaultSeverity: DiagnosticSeverity.Warning,
+            isEnabledByDefault: true);
     }
 }

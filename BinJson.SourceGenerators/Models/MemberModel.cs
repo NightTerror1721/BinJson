@@ -64,6 +64,9 @@ namespace Krampus.BinJson.SourceGenerators.Models
         /// <summary>Custom converter type (from [BJsonConverter])</summary>
         public string? CustomConverterType { get; set; }
 
+        /// <summary>Custom converter factory type (from [BJsonConverterFactory])</summary>
+        public string? CustomConverterFactoryType { get; set; }
+
         /// <summary>True if marked with [BJsonExtensionData]</summary>
         public bool IsExtensionData { get; set; }
 
@@ -73,11 +76,20 @@ namespace Krampus.BinJson.SourceGenerators.Models
         /// <summary>Version range metadata from [BJsonVersion]. Null if no version constraint.</summary>
         public VersionInfo? Version { get; set; }
 
+        /// <summary>Additional legacy names from [BJsonAlias].</summary>
+        public List<string> Aliases { get; } = new List<string>();
+
         /// <summary>Name of the static predicate method from [BJsonIgnoreWhen]. Null if not present.</summary>
         public string? IgnoreWhenMethod { get; set; }
 
         /// <summary>Name of the static mapper method from [BJsonValueMapper]. Null if not present.</summary>
         public string? ValueMapperMethod { get; set; }
+
+        /// <summary>Name of the static required predicate method from [BJsonRequiredWhen]. Null if not present.</summary>
+        public string? RequiredWhenMethod { get; set; }
+
+        /// <summary>RequiredWhen method parameter count: 0, 1, or 2.</summary>
+        public int RequiredWhenParameterCount { get; set; }
 
         /// <summary>True if marked with [BJsonExternalRef].</summary>
         public bool IsExternalRef { get; set; }
@@ -93,6 +105,9 @@ namespace Krampus.BinJson.SourceGenerators.Models
 
         /// <summary>Default value info from [BJsonDefaultValue] and/or [BJsonDefaultProvider]. Null if not present.</summary>
         public DefaultValueInfo? DefaultValue { get; set; }
+
+        /// <summary>Member-level numeric handling policy.</summary>
+        public int NumberHandling { get; set; }
 
         public abstract MemberKind Kind { get; }
     }

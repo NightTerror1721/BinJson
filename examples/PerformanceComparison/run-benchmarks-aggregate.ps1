@@ -157,6 +157,13 @@ $comparisons += Add-Comparison 'CLR' 'CLR serialize: generated vs reflection' 'C
 $comparisons += Add-Comparison 'CLR' 'CLR deserialize: generated vs reflection' 'CLR reflection deserialize' 'CLR generated deserialize'
 $comparisons += Add-Comparison 'CLR' 'CLR attributed serialize: generated vs reflection' 'CLR attributed reflection serialize' 'CLR attributed generated serialize'
 $comparisons += Add-Comparison 'CLR' 'CLR attributed deserialize missing defaults: generated vs reflection' 'CLR attributed reflection deserialize missing defaults' 'CLR attributed generated deserialize missing defaults'
+$comparisons += Add-Comparison 'CLR' 'CLR advanced mapper/default serialize: generated vs reflection' 'CLR advanced mapper/default reflection serialize' 'CLR advanced mapper/default generated serialize'
+$comparisons += Add-Comparison 'CLR' 'CLR advanced mapper/default deserialize: generated vs reflection' 'CLR advanced mapper/default reflection deserialize' 'CLR advanced mapper/default generated deserialize'
+$comparisons += Add-Comparison 'CLR' 'CLR advanced preprocessor deserialize: generated vs reflection' 'CLR advanced preprocess reflection deserialize' 'CLR advanced preprocess generated deserialize'
+$comparisons += Add-Comparison 'CLR' 'CLR advanced external-ref fixed deserialize: generated vs reflection' 'CLR advanced external-ref fixed reflection deserialize' 'CLR advanced external-ref fixed generated deserialize'
+$comparisons += Add-Comparison 'CLR' 'CLR advanced external-ref fixed serialize: generated vs reflection' 'CLR advanced external-ref fixed reflection serialize' 'CLR advanced external-ref fixed generated serialize'
+$comparisons += Add-Comparison 'CLR' 'CLR advanced polymorphic serialize: generated vs reflection' 'CLR advanced polymorphic reflection serialize' 'CLR advanced polymorphic generated serialize'
+$comparisons += Add-Comparison 'CLR' 'CLR advanced polymorphic deserialize: generated vs reflection' 'CLR advanced polymorphic reflection deserialize' 'CLR advanced polymorphic generated deserialize'
 
 $comparisons = $comparisons | Where-Object { $_ -ne $null }
 

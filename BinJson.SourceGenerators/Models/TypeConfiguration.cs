@@ -35,11 +35,25 @@ namespace Krampus.BinJson.SourceGenerators.Models
         /// <summary>Type discriminator property name (from [BJsonPolymorphic])</summary>
         public string TypeDiscriminatorPropertyName { get; set; } = "$type";
 
+        /// <summary>
+        /// Discriminator property inherited from a polymorphic base type.
+        /// Used so generated serializers for derived types also emit the discriminator key.
+        /// </summary>
+        public string? InheritedPolymorphicDiscriminatorPropertyName { get; set; }
+
+        /// <summary>
+        /// Discriminator value inherited from the polymorphic base declaration for this derived type.
+        /// </summary>
+        public string? InheritedPolymorphicDiscriminatorValue { get; set; }
+
         /// <summary>Derived types (from [BJsonDerivedType])</summary>
         public System.Collections.Generic.List<DerivedTypeInfo> DerivedTypes { get; } = new();
 
         /// <summary>Version context from [BJsonVersionContext]. Null if not present.</summary>
         public VersionInfo? VersionContext { get; set; }
+
+        /// <summary>Type-level version range from [BJsonVersion] on the type. Null if not present.</summary>
+        public VersionInfo? TypeVersionRange { get; set; }
 
         /// <summary>True if the type is marked with [BJsonPreprocessor].</summary>
         public bool HasPreprocessor { get; set; }
@@ -52,6 +66,15 @@ namespace Krampus.BinJson.SourceGenerators.Models
 
         /// <summary>Parameters of the static factory method. Null or empty if factory is parameterless.</summary>
         public System.Collections.Generic.List<ConstructorParameterModel>? FactoryMethodParameters { get; set; }
+
+        /// <summary>Optional explicit parameter-to-JSON-key mapping from [BJsonFactoryMethod(ParameterMapping=...)]</summary>
+        public System.Collections.Generic.Dictionary<string, string>? FactoryMethodParameterMapping { get; set; }
+
+        /// <summary>True when the type declares any valid [BJsonOnSerializing] hooks.</summary>
+        public bool HasOnSerializingHooks { get; set; }
+
+        /// <summary>True when the type declares any valid [BJsonOnDeserialized] hooks.</summary>
+        public bool HasOnDeserializedHooks { get; set; }
     }
 
     internal enum NamingPolicy

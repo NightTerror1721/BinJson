@@ -78,16 +78,12 @@ namespace Krampus.BinJson.SourceGenerators
             var attributeSymbols = new AttributeParser.AttributeSymbols(compilation);
 
             // Parse [BJsonSerializable] attribute
-            var configuration = AttributeParser.ParseTypeConfiguration(symbol, attributeSymbols);
+            var configuration = AttributeParser.ParseTypeConfiguration(symbol, attributeSymbols, diagnostics);
             if (configuration == null)
                 return null;
 
             // If type has a custom converter, we don't generate code
             if (configuration.CustomConverterType != null)
-                return null;
-
-            // If type is polymorphic, don't generate code - use runtime polymorphism support
-            if (configuration.IsPolymorphic)
                 return null;
 
             // Create model
@@ -99,12 +95,13 @@ namespace Krampus.BinJson.SourceGenerators
                 namespaceName,
                 symbol.Name,
                 symbol.IsValueType,
+                symbol.IsAbstract,
                 configuration);
 
             model.HintName = BuildHintName(symbol);
 
             // Analyze properties
-            foreach (var member in symbol.GetMembers().OfType<IPropertySymbol>())
+            foreach (var member in GetAllPropertySymbols(symbol))
             {
                 if (!ShouldIncludeProperty(member, configuration, attributeSymbols))
                     continue;
@@ -117,7 +114,7 @@ namespace Krampus.BinJson.SourceGenerators
             // Analyze fields (if IncludeFields = true)
             if (configuration.IncludeFields)
             {
-                foreach (var member in symbol.GetMembers().OfType<IFieldSymbol>())
+                foreach (var member in GetAllFieldSymbols(symbol))
                 {
                     // Skip compiler-generated backing fields
                     if (member.IsImplicitlyDeclared)
@@ -190,6 +187,50 @@ namespace Krampus.BinJson.SourceGenerators
             return new AnalysisResult(model, diagnostics);
         }
 
+        private static IEnumerable<IPropertySymbol> GetAllPropertySymbols(INamedTypeSymbol symbol)
+        {
+            var seenNames = new HashSet<string>(StringComparer.Ordinal);
+            var current = symbol;
+
+            while (current != null && current.SpecialType != SpecialType.System_Object)
+            {
+                foreach (var property in current.GetMembers().OfType<IPropertySymbol>())
+                {
+                    if (property.IsImplicitlyDeclared)
+                        continue;
+
+                    if (!seenNames.Add(property.Name))
+                        continue;
+
+                    yield return property;
+                }
+
+                current = current.BaseType;
+            }
+        }
+
+        private static IEnumerable<IFieldSymbol> GetAllFieldSymbols(INamedTypeSymbol symbol)
+        {
+            var seenNames = new HashSet<string>(StringComparer.Ordinal);
+            var current = symbol;
+
+            while (current != null && current.SpecialType != SpecialType.System_Object)
+            {
+                foreach (var field in current.GetMembers().OfType<IFieldSymbol>())
+                {
+                    if (field.IsImplicitlyDeclared)
+                        continue;
+
+                    if (!seenNames.Add(field.Name))
+                        continue;
+
+                    yield return field;
+                }
+
+                current = current.BaseType;
+            }
+        }
+
         /// <summary>
         /// Determine if a property should be included in serialization
         /// </summary>
@@ -212,8 +253,8 @@ namespace Krampus.BinJson.SourceGenerators
 
             if (ignoreAttr != null)
             {
-                var condition = AttributeParser.GetNamedArgument<int>(ignoreAttr, "Condition", 0);
-                if (condition == 0) // Always
+                var condition = AttributeParser.GetNamedArgument<int>(ignoreAttr, "Condition", 1);
+                if (condition == 1) // Always
                     return false;
             }
 
@@ -259,8 +300,8 @@ namespace Krampus.BinJson.SourceGenerators
 
             if (ignoreAttr != null)
             {
-                var condition = AttributeParser.GetNamedArgument<int>(ignoreAttr, "Condition", 0);
-                if (condition == 0) // Always
+                var condition = AttributeParser.GetNamedArgument<int>(ignoreAttr, "Condition", 1);
+                if (condition == 1) // Always
                     return false;
             }
 

@@ -28,6 +28,7 @@ namespace Krampus.BinJson.Serialization.Metadata
 
             // Resolve type-level version context
             var versionContext = ResolveVersionContext(type);
+            var (typeVersionIntroducedIn, typeVersionRemovedIn) = ResolveTypeVersionRange(type);
 
             foreach (var property in type.GetProperties(flags))
             {
@@ -54,6 +55,8 @@ namespace Krampus.BinJson.Serialization.Metadata
                     ?? propertyAttribute?.Name
                     ?? ApplyNamingPolicy(property.Name, options.NamingPolicy);
                 var converter = resolveConverter(property.PropertyType, property.GetCustomAttribute<BJsonConverterAttribute>());
+                if (converter is null)
+                    converter = ResolveMemberConverterFactory(property.PropertyType, property.GetCustomAttribute<BJsonConverterFactoryAttribute>());
                 var required = property.GetCustomAttribute<BJsonRequiredAttribute>() is not null || propertyAttribute?.Required == true;
                 var order = propertyAttribute?.Order ?? 0;
                 var isExtensionData = property.GetCustomAttribute<BJsonExtensionDataAttribute>() is not null;
@@ -91,6 +94,8 @@ namespace Krampus.BinJson.Serialization.Metadata
                         ?? propertyAttribute?.Name
                         ?? ApplyNamingPolicy(field.Name, options.NamingPolicy);
                     var converter = resolveConverter(field.FieldType, field.GetCustomAttribute<BJsonConverterAttribute>());
+                    if (converter is null)
+                        converter = ResolveMemberConverterFactory(field.FieldType, field.GetCustomAttribute<BJsonConverterFactoryAttribute>());
                     var required = field.GetCustomAttribute<BJsonRequiredAttribute>() is not null || propertyAttribute?.Required == true;
                     var order = propertyAttribute?.Order ?? 0;
                     var isExtensionData = field.GetCustomAttribute<BJsonExtensionDataAttribute>() is not null;
@@ -116,7 +121,17 @@ namespace Krampus.BinJson.Serialization.Metadata
 
             var constructor = SelectConstructor(type, options);
             var factoryMethod = SelectFactoryMethod(type, options);
-            return new TypeMetadata(type, orderedMembers, constructor, extensionDataMember, versionContext, factoryMethod);
+            var factoryParameterMapping = ParseFactoryParameterMapping(type, factoryMethod);
+            return new TypeMetadata(
+                type,
+                orderedMembers,
+                constructor,
+                extensionDataMember,
+                versionContext,
+                factoryMethod,
+                factoryParameterMapping,
+                typeVersionIntroducedIn,
+                typeVersionRemovedIn);
         }
 
         private static MemberMetadata BuildMemberMetadata(
@@ -182,12 +197,22 @@ namespace Krampus.BinJson.Serialization.Metadata
 
             // DefaultProvider method
             MethodInfo? defaultProviderMethod = null;
-            Func<object?>? defaultProviderDelegate = null;
+            Func<IComparable?, object?>? defaultProviderDelegate = null;
             var defaultProviderAttr = memberInfo.GetCustomAttribute<BJsonDefaultProviderAttribute>();
             if (defaultProviderAttr != null)
             {
                 defaultProviderMethod = FindStaticMethod(declaringType, defaultProviderAttr.MethodName);
                 defaultProviderDelegate = CreateDefaultProviderDelegate(defaultProviderMethod);
+            }
+
+            // RequiredWhen method
+            MethodInfo? requiredWhenMethod = null;
+            Func<string, IComparable?, bool>? requiredWhenDelegate = null;
+            var requiredWhenAttr = memberInfo.GetCustomAttribute<BJsonRequiredWhenAttribute>();
+            if (requiredWhenAttr != null)
+            {
+                requiredWhenMethod = FindStaticMethod(declaringType, requiredWhenAttr.MethodName);
+                requiredWhenDelegate = CreateRequiredWhenDelegate(requiredWhenMethod);
             }
 
             // Version range
@@ -202,19 +227,33 @@ namespace Krampus.BinJson.Serialization.Metadata
                 legacyJsonName = versionAttr.RenamedFrom;
             }
 
+            var aliases = memberInfo.GetCustomAttributes<BJsonAliasAttribute>()
+                .Select(a => a.Name)
+                .Where(name => !string.IsNullOrWhiteSpace(name))
+                .Distinct(StringComparer.Ordinal)
+                .ToArray();
+
+            var numberHandling = memberInfo.GetCustomAttribute<BJsonNumberHandlingAttribute>()?.Handling
+                ?? BJsonNumberHandling.Strict;
+
             return new MemberMetadata(
+                memberInfo.Name,
                 jsonName, memberType, getter, setter, converter, order, required,
                 ignoreCondition, isExtensionData,
                 ignoreWhenPredicate,
                 mapperFull, mapperShort,
                 hasDefaultConstant, defaultConstantValue,
                 defaultProviderMethod,
+                requiredWhenMethod,
                 ignoreWhenPredicateDelegate,
                 mapperFullDelegate,
                 mapperShortDelegate,
                 defaultProviderDelegate,
+                requiredWhenDelegate,
                 versionIntroducedIn, versionRemovedIn,
-                legacyJsonName);
+                legacyJsonName,
+                aliases,
+                numberHandling);
         }
 
         private static IComparable? ResolveVersionContext(Type type)
@@ -223,6 +262,17 @@ namespace Krampus.BinJson.Serialization.Metadata
             if (attr == null)
                 return null;
             return ParseVersion(attr.VersionType, attr.CurrentVersion);
+        }
+
+        private static (IComparable? IntroducedIn, IComparable? RemovedIn) ResolveTypeVersionRange(Type type)
+        {
+            var attr = type.GetCustomAttribute<BJsonVersionAttribute>();
+            if (attr == null)
+                return (null, null);
+
+            return (
+                ParseVersion(attr.VersionType, attr.IntroducedIn),
+                ParseVersion(attr.VersionType, attr.RemovedIn));
         }
 
         private static IComparable? ParseVersion(Type versionType, string? raw)
@@ -300,33 +350,161 @@ namespace Krampus.BinJson.Serialization.Metadata
             }
         }
 
-        private static Func<object?>? CreateDefaultProviderDelegate(MethodInfo? method)
+        private static Func<IComparable?, object?>? CreateDefaultProviderDelegate(MethodInfo? method)
         {
             if (method == null)
                 return null;
 
+            var parameters = method.GetParameters();
+
             try
             {
-                return (Func<object?>)method.CreateDelegate(typeof(Func<object?>));
+                if (parameters.Length == 0)
+                {
+                    var noArgsDelegate = (Func<object?>)method.CreateDelegate(typeof(Func<object?>));
+                    return _ => noArgsDelegate();
+                }
+
+                if (parameters.Length == 1
+                    && parameters[0].ParameterType == typeof(IComparable))
+                {
+                    return (Func<IComparable?, object?>)method.CreateDelegate(typeof(Func<IComparable?, object?>));
+                }
             }
             catch
             {
-                return null;
             }
+
+            return null;
+        }
+
+        private static Func<string, IComparable?, bool>? CreateRequiredWhenDelegate(MethodInfo? method)
+        {
+            if (method == null)
+                return null;
+
+            var parameters = method.GetParameters();
+            if (!method.IsStatic || method.ReturnType != typeof(bool))
+                return null;
+
+            try
+            {
+                if (parameters.Length == 0)
+                {
+                    var noArgs = (Func<bool>)method.CreateDelegate(typeof(Func<bool>));
+                    return (_, _) => noArgs();
+                }
+
+                if (parameters.Length == 1
+                    && parameters[0].ParameterType == typeof(IComparable))
+                {
+                    var versionOnly = (Func<IComparable?, bool>)method.CreateDelegate(typeof(Func<IComparable?, bool>));
+                    return (_, version) => versionOnly(version);
+                }
+
+                if (parameters.Length == 2
+                    && parameters[0].ParameterType == typeof(string)
+                    && parameters[1].ParameterType == typeof(IComparable))
+                {
+                    return (Func<string, IComparable?, bool>)method.CreateDelegate(typeof(Func<string, IComparable?, bool>));
+                }
+            }
+            catch
+            {
+            }
+
+            return null;
         }
 
         private static MethodInfo? SelectFactoryMethod(Type type, BJsonSerializerOptions options)
         {
-            var staticFlags = BindingFlags.Static | BindingFlags.Public;
-            if (options.IncludePrivateMembers)
-                staticFlags |= BindingFlags.NonPublic;
+            // Factory methods are explicit opt-in via attribute; include all access levels for parity
+            // with generated serializers that run in the declaring partial type.
+            var staticFlags = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
 
-            foreach (var method in type.GetMethods(staticFlags))
+            var methods = type.GetMethods(staticFlags)
+                .Where(m => m.GetCustomAttribute<BJsonFactoryMethodAttribute>() != null)
+                .ToArray();
+
+            if (methods.Length == 0)
+                return null;
+
+            if (methods.Length > 1)
             {
-                if (method.GetCustomAttribute<BJsonFactoryMethodAttribute>() != null)
-                    return method;
+                throw new BJsonMetadataException(
+                    $"Type '{type.FullName}' has multiple methods marked with [BJsonFactoryMethod]. Only one is allowed.");
             }
-            return null;
+
+            var method = methods[0];
+            if (!IsValidFactoryMethod(type, method))
+            {
+                throw new BJsonMetadataException(
+                    $"Factory method '{method.Name}' on type '{type.FullName}' must be static, non-generic, return '{type.FullName}' (or derived), and avoid ref/out parameters.");
+            }
+
+            return method;
+        }
+
+        private static bool IsValidFactoryMethod(Type declaringType, MethodInfo method)
+        {
+            if (!method.IsStatic || method.IsGenericMethod)
+                return false;
+
+            if (!declaringType.IsAssignableFrom(method.ReturnType))
+                return false;
+
+            foreach (var parameter in method.GetParameters())
+            {
+                if (parameter.ParameterType.IsByRef || parameter.IsOut)
+                    return false;
+            }
+
+            return true;
+        }
+
+        private static IReadOnlyDictionary<string, string>? ParseFactoryParameterMapping(Type type, MethodInfo? factoryMethod)
+        {
+            if (factoryMethod == null)
+                return null;
+
+            var attribute = factoryMethod.GetCustomAttribute<BJsonFactoryMethodAttribute>();
+            var raw = attribute?.ParameterMapping;
+            if (raw == null || raw.Length == 0)
+                return null;
+
+            if ((raw.Length % 2) != 0)
+            {
+                throw new BJsonMetadataException(
+                    $"Factory method '{factoryMethod.Name}' on type '{type.FullName}' has invalid ParameterMapping. Expected alternating ['paramName', 'jsonKey'] pairs.");
+            }
+
+            var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var parameterNames = new HashSet<string>(factoryMethod.GetParameters().Select(p => p.Name ?? string.Empty), StringComparer.OrdinalIgnoreCase);
+            var seenParameters = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var seenJsonKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            for (int i = 0; i < raw.Length; i += 2)
+            {
+                var parameterName = raw[i];
+                var jsonKey = raw[i + 1];
+
+                if (string.IsNullOrWhiteSpace(parameterName) || string.IsNullOrWhiteSpace(jsonKey))
+                {
+                    throw new BJsonMetadataException(
+                        $"Factory method '{factoryMethod.Name}' on type '{type.FullName}' has invalid ParameterMapping entries. Parameter names and JSON keys must be non-empty.");
+                }
+
+                if (!parameterNames.Contains(parameterName)
+                    || !seenParameters.Add(parameterName)
+                    || !seenJsonKeys.Add(jsonKey))
+                {
+                    throw new BJsonMetadataException(
+                        $"Factory method '{factoryMethod.Name}' on type '{type.FullName}' has invalid ParameterMapping target '{parameterName}'.");
+                }
+
+                map[parameterName] = jsonKey;
+            }
+
+            return map;
         }
 
         private static string ApplyNamingPolicy(string name, NamingPolicy namingPolicy)
@@ -338,6 +516,23 @@ namespace Krampus.BinJson.Serialization.Metadata
                 NamingPolicy.KebabCase => ToSeparatedCase(name, '-'),
                 _ => name
             };
+        }
+
+        private static IBJsonConverter? ResolveMemberConverterFactory(Type memberType, BJsonConverterFactoryAttribute? attribute)
+        {
+            if (attribute is null)
+                return null;
+
+            if (!typeof(IBJsonConverterFactory).IsAssignableFrom(attribute.FactoryType))
+                throw new BJsonMetadataException($"Converter factory '{attribute.FactoryType.FullName}' must implement {nameof(IBJsonConverterFactory)}.");
+
+            if (Activator.CreateInstance(attribute.FactoryType) is not IBJsonConverterFactory factory)
+                throw new BJsonMetadataException($"Converter factory '{attribute.FactoryType.FullName}' could not be instantiated.");
+
+            if (!factory.CanConvert(memberType))
+                return null;
+
+            return factory.CreateConverter(memberType);
         }
 
         private static string ToSeparatedCase(string name, char separator)

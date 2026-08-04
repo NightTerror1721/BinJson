@@ -39,5 +39,11 @@ namespace Krampus.BinJson.Error
 
         BinaryFormatError,
         BinarySerializationError,
+
+        PreprocessorPipelineError,
+        ExternalReferencePathError,
+        ExternalReferenceReadError,
+        ExternalReferenceWriteError,
+        ExternalReferenceSecurityViolation,
     }
 }

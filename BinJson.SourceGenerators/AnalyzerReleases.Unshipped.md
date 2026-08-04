@@ -15,3 +15,8 @@ BJSON007 | BinJson.SourceGenerator | Warning | Referenced attribute method not f
 BJSON008 | BinJson.SourceGenerator | Warning | Referenced attribute method is not accessible from generated code
 BJSON009 | BinJson.SourceGenerator | Warning | Referenced attribute method has invalid signature
 BJSON010 | BinJson.SourceGenerator | Warning | Unsupported type shape for source generation (generic or nested)
+BJSON012 | BinJson.SourceGenerator | Warning | Invalid [BJsonFactoryMethod(ParameterMapping=...)] declaration
+BJSON013 | BinJson.SourceGenerator | Warning | Member declares both [BJsonDefaultValue] and [BJsonDefaultProvider]; provider takes precedence
+BJSON014 | BinJson.SourceGenerator | Error | Multiple methods marked with [BJsonFactoryMethod] in the same type
+BJSON015 | BinJson.SourceGenerator | Error | Invalid [BJsonFactoryMethod] signature (return type/static/generic/ref-out constraints)
+BJSON016 | BinJson.SourceGenerator | Warning | Invalid [BJsonFactoryMethod(ParameterMapping=...)] target (unknown/duplicate parameter or duplicate JSON key)

@@ -1,333 +1,275 @@
-# BJson Attribute System — Reference & Tutorial
+# BJson Attribute Reference
 
-This document is the complete reference for every attribute in `Krampus.BinJson.Serialization`.
-It covers both the original set and all extensions introduced in the extended attribute system.
+This document is the authoritative reference for every public attribute in `Krampus.BinJson.Serialization`.
 
----
+It covers:
+
+- What each attribute does
+- Where it can be applied
+- How reflection and source-generated serializers interpret it
+- Precedence and interaction rules
+- Valid examples that match the current public API
 
 ## Table of Contents
 
-1. [Quick Reference](#quick-reference)
-2. [Getting Started](#getting-started)
-3. [Member Control](#member-control)
-   - [BJsonProperty](#bjsonproperty)
-   - [BJsonPropertyName](#bjsonpropertyname)
-   - [BJsonRequired](#bjsonrequired)
-   - [BJsonInclude](#bjsoninclude)
-   - [BJsonIgnore](#bjsonignore)
-   - [BJsonIgnoreWhen](#bjsonignorewhen)
-   - [BJsonExtensionData](#bjsonextensiondata)
-   - [BJsonConverter (member)](#bjsonconverter-member)
-4. [Value Transformation](#value-transformation)
-   - [BJsonValueMapper](#bjsonvaluemapper)
-5. [Default Values](#default-values)
-   - [BJsonDefaultValue](#bjsondefaultvalue)
-   - [BJsonDefaultProvider](#bjsondefaultprovider)
-   - [Priority Rules](#priority-rules)
-6. [Version System](#version-system)
-   - [BJsonVersionContext](#bjsonversioncontext)
-   - [BJsonVersion](#bjsonversion)
-   - [RenamedFrom — Key Migration](#renamedfrom--key-migration)
-   - [Version Flow to Methods](#version-flow-to-methods)
-7. [Instantiation](#instantiation)
-   - [BJsonConstructor](#bjsonconstructor)
-   - [BJsonFactoryMethod](#bjsonfactorymethod)
-8. [Type-Level Control](#type-level-control)
-   - [BJsonSerializable](#bjsonserializable)
-   - [BJsonConverter (type)](#bjsonconverter-type)
-   - [BJsonPolymorphic](#bjsonpolymorphic)
-   - [BJsonDerivedType](#bjsonderivedtype)
-9. [DOM Preprocessing](#dom-preprocessing)
-   - [BJsonPreprocessor](#bjsonpreprocessor)
-   - [BJsonAnchor](#bjsonanchor)
-   - [BJsonExternalRef](#bjsonexternalref)
-   - [Conditional Blocks Syntax](#conditional-blocks-syntax)
-10. [Source Generator Diagnostics](#source-generator-diagnostics)
-11. [Complete Worked Example](#complete-worked-example)
-
----
+1. Quick reference
+2. Execution order and precedence
+3. Contract shape attributes
+4. Defaulting and validation attributes
+5. Conversion and transformation attributes
+6. Versioning attributes
+7. Construction attributes
+8. Polymorphism attributes
+9. Preprocessor and external reference attributes
+10. Lifecycle attributes
+11. Source generator diagnostics
+12. Complete example
 
 ## Quick Reference
 
 | Attribute | Target | Purpose |
 |---|---|---|
-| `[BJsonSerializable]` | class / struct | Marks type for source generation; sets `IncludeFields`, `IncludePrivateMembers`, `NamingPolicy` |
-| `[BJsonProperty]` | property / field | Sets `Name`, `Order`, `Required` |
-| `[BJsonPropertyName]` | property / field | Overrides JSON key name |
-| `[BJsonRequired]` | property / field | Throws if key is absent during deserialization |
-| `[BJsonInclude]` | property / field | Forces inclusion of a non-public member |
-| `[BJsonIgnore]` | property / field | Static ignore condition (`Always`, `WhenWritingNull`, etc.) |
-| `[BJsonIgnoreWhen]` | property / field | Dynamic ignore via a static predicate method on the same type |
-| `[BJsonValueMapper]` | property / field | Transform value via a static mapper method on the same type |
-| `[BJsonDefaultValue]` | property / field | Constant default applied when JSON key is absent |
-| `[BJsonDefaultProvider]` | property / field | Static method provides default when JSON key is absent |
-| `[BJsonVersion]` | property / field / class / struct | Version range (introducedIn / removedIn) and RenamedFrom |
-| `[BJsonVersionContext]` | class / struct | Declares the current document version for the type |
-| `[BJsonExtensionData]` | property / field | Collects unknown JSON keys into `IDictionary<string, BJsonValue>` |
-| `[BJsonConverter]` | class / struct / property / field | Custom converter for type or member |
-| `[BJsonConstructor]` | constructor | Designates deserialization constructor |
-| `[BJsonFactoryMethod]` | static method | Designates static factory for deserialization (supersedes `[BJsonConstructor]`) |
-| `[BJsonPolymorphic]` | class / interface | Enables polymorphic serialization with a type discriminator |
-| `[BJsonDerivedType]` | class | Registers a derived type and its discriminator value |
-| `[BJsonPreprocessor]` | class / struct | Enables DOM pre-processing (conditionals, anchors, variables) |
-| `[BJsonAnchor]` | property / field | Registers member value as a named anchor for `$ref` resolution |
-| `[BJsonExternalRef]` | property / field | Member value is loaded from / written to an external BJson file |
+| `BJsonSerializable` | class, struct | Enables attribute-based CLR serialization and source generation |
+| `BJsonConverter` | class, struct, property, field | Applies a specific converter type |
+| `BJsonConverterFactory` | class, struct, property, field | Applies a converter factory |
+| `BJsonProperty` | property, field | Sets name, order, and requiredness together |
+| `BJsonPropertyName` | property, field | Sets the exact JSON key |
+| `BJsonInclude` | property, field | Forces inclusion of a member that would otherwise be excluded |
+| `BJsonRequired` | property, field | Makes a member always required during deserialization |
+| `BJsonRequiredWhen` | property, field | Makes a member conditionally required |
+| `BJsonIgnore` | property, field | Statically ignores a member depending on the configured condition |
+| `BJsonIgnoreWhen` | property, field | Dynamically ignores a member through a static predicate |
+| `BJsonExtensionData` | property, field | Captures unknown JSON keys into a dictionary |
+| `BJsonValueMapper` | property, field | Transforms the `BJsonValue` representation during read and write |
+| `BJsonDefaultValue` | property, field | Applies a compile-time constant default |
+| `BJsonDefaultProvider` | property, field | Applies a default produced by a static method |
+| `BJsonNumberHandling` | property, field | Controls numeric string interoperability and lossless writing |
+| `BJsonVersionContext` | class, struct | Declares the current document version for the type |
+| `BJsonVersion` | property, field, class, struct | Controls version ranges and legacy key migration |
+| `BJsonAlias` | property, field | Accepts additional legacy read-time JSON names |
+| `BJsonConstructor` | constructor | Selects the constructor used for deserialization |
+| `BJsonFactoryMethod` | method | Selects a static factory for deserialization |
+| `BJsonPolymorphic` | class, interface | Enables discriminator-based polymorphism |
+| `BJsonDerivedType` | class | Registers allowed derived types |
+| `BJsonDiscriminatorValue` | class, struct | Declares the discriminator token for a concrete type |
+| `BJsonPreprocessor` | class, struct | Enables DOM preprocessing before typed binding |
+| `BJsonAnchor` | property, field | Registers a named anchor for `$ref` replacement |
+| `BJsonExternalRef` | property, field | Loads or writes a member value from/to an external BJson file |
+| `BJsonOnSerializing` | method | Runs an instance hook before serialization |
+| `BJsonOnDeserialized` | method | Runs an instance hook after deserialization |
 
----
+## Execution Order and Precedence
 
-## Getting Started
+### Serialization pipeline
 
-Add `using Krampus.BinJson.Serialization;` and mark your type with `[BJsonSerializable]`:
+When BinJson serializes an attributed CLR object, the effective flow is:
+
+1. Runtime type resolution for polymorphic values.
+2. Type-level version filtering.
+3. Member-level ignore conditions from `BJsonIgnore`.
+4. Dynamic ignore predicates from `BJsonIgnoreWhen`.
+5. External-reference write handling from `BJsonExternalRef`.
+6. Member conversion through `BJsonConverter` or `BJsonConverterFactory` when present.
+7. Normal serialization when no custom converter applies.
+8. `BJsonValueMapper` write transformation.
+9. Numeric write adaptation from `BJsonNumberHandling`.
+10. Lifecycle hook invocation from `BJsonOnSerializing` occurs before member emission starts.
+
+### Deserialization pipeline
+
+When BinJson deserializes into an attributed CLR type, the effective flow is:
+
+1. Polymorphic discriminator resolution.
+2. DOM preprocessing from `BJsonPreprocessor`.
+3. Anchor replacement from `BJsonAnchor` and external reference loading from `BJsonExternalRef`.
+4. Type-level and member-level version filtering.
+5. Key lookup using current name, `RenamedFrom`, and `BJsonAlias` values.
+6. Defaulting from `BJsonDefaultProvider` or `BJsonDefaultValue`.
+7. Requiredness checks from `BJsonRequired` and `BJsonRequiredWhen`.
+8. `BJsonIgnoreWhen` read-time predicate checks.
+9. `BJsonValueMapper` read transformation.
+10. Numeric string parsing from `BJsonNumberHandling`.
+11. Member conversion through `BJsonConverter` or `BJsonConverterFactory` when present.
+12. Constructor or factory materialization.
+13. Lifecycle hook invocation from `BJsonOnDeserialized`.
+
+### General precedence rules
+
+- `BJsonPropertyName` wins over `BJsonProperty.Name`.
+- `BJsonDefaultProvider` wins over `BJsonDefaultValue` when both are present.
+- `BJsonFactoryMethod` takes precedence over `BJsonConstructor`.
+- `BJsonIgnore` is evaluated before `BJsonIgnoreWhen`.
+- `BJsonSerializerOptions.Version` overrides `BJsonVersionContext` at runtime.
+- Source-generated serializers require referenced helper methods to be callable from generated code, typically `internal`, `public`, or `protected internal`.
+- Reflection-based deserialization can use private factory methods; generated serializers cannot.
+
+## Contract Shape Attributes
+
+### `BJsonSerializable`
+
+Use this on classes and structs that should participate in attribute-based CLR serialization.
 
 ```csharp
-using Krampus.BinJson;
-using Krampus.BinJson.Serialization;
-
-[BJsonSerializable]
-public class PlayerSave
+[BJsonSerializable(NamingPolicy = NamingPolicy.CamelCase)]
+public sealed class PlayerProfile
 {
-	public string Name { get; set; } = string.Empty;
-	public int Level { get; set; }
+    public string PlayerName { get; set; } = string.Empty;
+    public int Level { get; set; }
 }
-
-// Serialize
-BJsonValue bson = BJson.Serialize(new PlayerSave { Name = "Hero", Level = 10 });
-
-// Deserialize
-PlayerSave save = BJson.Deserialize<PlayerSave>(bson)!;
 ```
 
-The source generator automatically emits a zero-reflection serializer for the type.
+Key properties:
 
-### Important: Helper Method Visibility
+- `IncludeFields`: include fields in addition to properties.
+- `IncludePrivateMembers`: allow non-public members to participate.
+- `NamingPolicy`: `Default`, `CamelCase`, `SnakeCase`, or `KebabCase`.
 
-When using attributes that reference static methods (`[BJsonIgnoreWhen]`, `[BJsonValueMapper]`, `[BJsonDefaultProvider]`, `[BJsonFactoryMethod]`), those methods **must be `internal` or `public`** — they cannot be `private`.
+Use `BJsonInclude` when only a few non-public members should be included.
 
-**Why:** The source generator emits a separate serializer class (e.g., `PlayerSave_BJsonSerializer`) in the same assembly and namespace. This class needs to call your helper methods directly, so `private` visibility will cause compilation errors.
+### `BJsonProperty`
 
-**Recommendation:** Use `internal` for helper methods to keep them hidden from external assemblies while allowing the generated serializer to access them.
-
----
-
-## Member Control
-
-### BJsonProperty
-
-Customises how a member participates in serialization.
+Use this when you want to configure several contract options on one member.
 
 ```csharp
-public class Item
-{
-	[BJsonProperty(Name = "item_name", Order = 0, Required = true)]
-	public string Name { get; set; } = string.Empty;
-
-	[BJsonProperty(Order = 1)]
-	public int Quantity { get; set; }
-}
+[BJsonProperty(Name = "player_name", Order = 0, Required = true)]
+public string Name { get; set; } = string.Empty;
 ```
 
-| Property | Type | Description |
-|---|---|---|
-| `Name` | `string?` | Override JSON key name |
-| `Order` | `int` | Controls serialization order (ascending). Default `0`. |
-| `Required` | `bool` | Equivalent to placing `[BJsonRequired]` on the member |
+Rules:
 
-> **Tip:** `[BJsonPropertyName]` takes precedence over `BJsonProperty.Name` when both are present.
+- `Name` changes the JSON key unless `BJsonPropertyName` is also present.
+- `Order` controls write order only.
+- `Required = true` behaves like `BJsonRequired`.
 
----
+### `BJsonPropertyName`
 
-### BJsonPropertyName
-
-Directly sets the JSON key without the other options of `[BJsonProperty]`:
+Use this when all you need is a stable explicit wire name.
 
 ```csharp
 [BJsonPropertyName("player_level")]
 public int Level { get; set; }
 ```
 
----
+This is the strongest name override for the member.
 
-### BJsonRequired
+### `BJsonInclude`
 
-Throws `InvalidOperationException` during deserialization if the JSON key is absent (in strict mode):
+Use this to include a member that would otherwise be excluded by visibility.
+
+```csharp
+[BJsonSerializable]
+public sealed class SessionState
+{
+    [BJsonInclude]
+    internal string Token { get; set; } = string.Empty;
+}
+```
+
+### `BJsonExtensionData`
+
+Use this to preserve unknown keys for forward compatibility.
+
+```csharp
+[BJsonSerializable]
+public sealed class ConfigDocument
+{
+    public string Name { get; set; } = string.Empty;
+
+    [BJsonExtensionData]
+    public Dictionary<string, BJsonValue>? ExtraData { get; set; }
+}
+```
+
+Rules:
+
+- Only one extension-data member is allowed per type.
+- The member must be compatible with `IDictionary<string, BJsonValue>`.
+- Unknown keys are re-emitted during serialization.
+
+## Defaulting and Validation Attributes
+
+### `BJsonRequired`
+
+Use this when a member must always be present.
 
 ```csharp
 [BJsonRequired]
 public string UserId { get; set; } = string.Empty;
 ```
 
----
+In strict mode, missing data throws during deserialization.
 
-### BJsonInclude
+### `BJsonRequiredWhen`
 
-Forces a non-public member to be included even when `IncludePrivateMembers = false`:
+Use this when requiredness depends on version or context.
 
 ```csharp
-[BJsonSerializable]
-public class Config
-{
-	[BJsonInclude]
-	internal string InternalToken { get; set; } = string.Empty;
-}
+[BJsonRequiredWhen(nameof(IsNameRequired))]
+public string? Name { get; set; }
+
+internal static bool IsNameRequired(string memberName, IComparable? version)
+    => version is Version semantic && semantic >= new Version(2, 0, 0);
 ```
 
----
-
-### BJsonIgnore
-
-Excludes a member based on a static condition.
+Accepted method signatures:
 
 ```csharp
-// Always ignore
+static bool Method()
+static bool Method(IComparable? version)
+static bool Method(string memberName, IComparable? version)
+```
+
+### `BJsonIgnore`
+
+Use this for fixed ignore behavior.
+
+```csharp
 [BJsonIgnore]
 public string DebugInfo { get; set; } = string.Empty;
 
-// Ignore during serialization when value is null
 [BJsonIgnore(Condition = BJsonIgnoreCondition.WhenWritingNull)]
 public string? Alias { get; set; }
 
-// Ignore during serialization when value equals CLR default
-[BJsonIgnore(Condition = BJsonIgnoreCondition.WhenWritingDefault)]
+[BJsonIgnore(Condition = BJsonIgnoreCondition.WhenWritingCustomDefault)]
+public int Count { get; set; }
+```
+
+Supported conditions:
+
+- `Always`
+- `Never`
+- `WhenWritingNull`
+- `WhenWritingDefault`
+- `WhenWritingCustomDefault`
+- `WhenWriting`
+- `WhenReading`
+
+`WhenWritingCustomDefault` compares against the provider-supplied default when `BJsonDefaultProvider` is present.
+
+### `BJsonIgnoreWhen`
+
+Use this when ignore behavior depends on the current value or version.
+
+```csharp
+[BJsonIgnoreWhen(nameof(ShouldIgnoreScore))]
 public int Score { get; set; }
+
+internal static bool ShouldIgnoreScore(object? value, string propertyName, IComparable? version)
+    => version is Version semantic
+       && semantic >= new Version(2, 0, 0)
+       && value is int score
+       && score == 0;
 ```
 
-`BJsonIgnoreCondition` values:
-
-| Value | Behaviour |
-|---|---|
-| `Never` (0) | Never ignore. Same as not placing the attribute. |
-| `Always` (1) | Always ignore both on read and write. **Default when no condition is specified.** |
-| `WhenWritingNull` (2) | Skip during serialization when the value is `null`. |
-| `WhenWritingDefault` (3) | Skip during serialization when the value equals `default(T)`. |
-| `WhenWritingCustomDefault` (4) | Like `WhenWritingDefault` but uses the custom default from `[BJsonDefaultProvider]` if present. |
-| `WhenWriting` (5) | Skip only during serialization; member is still read during deserialization. |
-| `WhenReading` (6) | Skip only during deserialization; member is still written during serialization. |
-
----
-
-### BJsonIgnoreWhen
-
-Provides dynamic ignore logic via a **static method on the same type**. This is evaluated at runtime (or emitted as a direct static call by the source generator).
-
-**Method signature (required):**
-```csharp
-static bool MethodName(object? value, string propertyName, IComparable? version)
-```
-
-- `value` — the current member value (may be `null`).
-- `propertyName` — the CLR member name.
-- `version` — the active document version from `[BJsonVersionContext]`, or `null` if none.
-- Returns `true` to **ignore** the member for the current operation.
-
-**Visibility requirement:** The method must be `internal` or `public` (not `private`) because the source generator emits a separate serializer class in the same assembly.
+Accepted signature:
 
 ```csharp
-[BJsonSerializable]
-[BJsonVersionContext(typeof(Version), "2.0.0")]
-public class PlayerSave
-{
-	[BJsonIgnoreWhen(nameof(ShouldIgnoreScore))]
-	public int Score { get; set; }
-
-	internal static bool ShouldIgnoreScore(object? value, string propertyName, IComparable? version)
-		=> version != null
-		   && version.CompareTo(new Version("2.0.0")) >= 0
-		   && (int)value! == 0;
-}
+static bool Method(object? value, string propertyName, IComparable? version)
 ```
 
-`[BJsonIgnoreWhen]` is **orthogonal** to `[BJsonIgnore]` — both can appear on the same member.
-`[BJsonIgnore]` is evaluated first; if it causes the member to be ignored, the predicate is not called.
+### `BJsonDefaultValue`
 
----
-
-### BJsonExtensionData
-
-Designates a `Dictionary<string, BJsonValue>` (or `IDictionary<string, BJsonValue>`) member to collect all JSON keys that do not map to any declared member during deserialization.
-During serialization, the dictionary entries are merged back into the output object.
-
-```csharp
-[BJsonSerializable]
-public class FlexibleModel
-{
-	public string Name { get; set; } = string.Empty;
-
-	[BJsonExtensionData]
-	public Dictionary<string, BJsonValue>? Extra { get; set; }
-}
-```
-
-Only one `[BJsonExtensionData]` member is allowed per type. Diagnostic `BJSON003` is emitted otherwise.
-
----
-
-### BJsonConverter (member)
-
-Applies a custom `BJsonConverter<T>` to a single member, overriding the type-level converter:
-
-```csharp
-[BJsonConverter(typeof(EpochMillisecondsConverter))]
-public DateTime CreatedAt { get; set; }
-```
-
----
-
-## Value Transformation
-
-### BJsonValueMapper
-
-Transforms the member value through a **static method on the same type** both during serialization (before writing) and deserialization (after reading).
-
-**Full signature (preferred):**
-```csharp
-static BJsonValue MethodName(BJsonValue value, string propertyName, IComparable? version, bool isReading)
-```
-
-**Fallback signature (no direction flag):**
-```csharp
-static BJsonValue MethodName(BJsonValue value)
-```
-
-- `value` — the BJsonValue being read or written.
-- `propertyName` — the CLR member name.
-- `version` — the active document version, or `null` if none.
-- `isReading` — `true` during deserialization, `false` during serialization.
-- Returns the transformed `BJsonValue`.
-
-> Runtime reflection supports both signatures above. Source-generated serializers require the full signature with four parameters.
-
-**Visibility requirement:** The method must be `internal` or `public` (not `private`) because the source generator emits a separate serializer class in the same assembly.
-
-```csharp
-[BJsonSerializable]
-[BJsonVersionContext(typeof(Version), "2.0.0")]
-public class LegacyData
-{
-	[BJsonValueMapper(nameof(MapScore))]
-	public int Score { get; set; }
-
-	internal static BJsonValue MapScore(BJsonValue value, string propertyName, IComparable? version, bool isReading)
-	{
-		// v1.x stored score * 10; normalise on read
-		if (isReading && version != null && version.CompareTo(new Version("2.0.0")) < 0)
-		{
-			var scaledScore = value.IntValue;
-			return BJsonValue.Create(scaledScore / 10);
-		}
-		return value;
-	}
-}
-```
-
----
-
-## Default Values
-
-Both attributes act **only during deserialization**: when the JSON key is absent or its value is `null` on a non-nullable member, the default is applied instead of `default(T)`.
-
-### BJsonDefaultValue
-
-Accepts any compile-time constant: `bool`, numeric types, `char`, `string`, or an enum value cast to its underlying integer.
+Use this for compile-time constant defaults.
 
 ```csharp
 [BJsonDefaultValue(1)]
@@ -335,361 +277,465 @@ public int Level { get; set; }
 
 [BJsonDefaultValue("guest")]
 public string Role { get; set; } = string.Empty;
-
-[BJsonDefaultValue(true)]
-public bool IsActive { get; set; }
 ```
 
-### BJsonDefaultProvider
+This applies when the key is missing and also when a non-nullable value member receives an explicit `null` token.
 
-References a **static parameterless method** on the same type for complex or computed defaults:
+### `BJsonDefaultProvider`
 
-**Visibility requirement:** The method must be `internal` or `public` (not `private`) because the source generator emits a separate serializer class in the same assembly.
+Use this for computed or object defaults.
 
 ```csharp
 [BJsonDefaultProvider(nameof(GetDefaultInventory))]
-public Inventory StartInventory { get; set; }
+public Inventory Inventory { get; set; } = new Inventory();
 
-internal static Inventory GetDefaultInventory() => new Inventory { Gold = 100 };
+internal static Inventory GetDefaultInventory()
+    => new Inventory { Gold = 100 };
 ```
 
-**Method signatures accepted:**
+Version-aware defaults are supported:
+
 ```csharp
-static T      MethodName()   // strongly typed — preferred
-static object? MethodName()  // loosely typed — fallback
+[BJsonDefaultProvider(nameof(GetModeDefault))]
+public string Mode { get; set; } = string.Empty;
+
+internal static string GetModeDefault(IComparable? version)
+    => version is Version semantic && semantic >= new Version(3, 0, 0)
+       ? "modern"
+       : "legacy";
 ```
 
-### Priority Rules
-
-When multiple sources of default are present, they are resolved in this order:
-
-1. `[BJsonDefaultProvider]` — always wins.
-2. `[BJsonDefaultValue]` — used when no provider is present.
-3. CLR `default(T)` — used when neither attribute is present.
-
-If both `[BJsonDefaultValue]` and `[BJsonDefaultProvider]` appear on the same member, the source generator emits a warning and the provider takes effect.
-
-### Composing with Version System
-
-A common pattern for fields added in newer versions:
+Accepted signatures:
 
 ```csharp
-[BJsonVersion(typeof(Version), introducedIn: "2.0.0")]
-[BJsonDefaultValue(0)]
-public int NewField { get; set; }
-// Documents from v1.x that lack this key will receive 0 during deserialization.
+static T Method()
+static object? Method()
+static T Method(IComparable? version)
+static object? Method(IComparable? version)
 ```
 
----
+## Conversion and Transformation Attributes
 
-## Version System
+### `BJsonConverter`
 
-The version system lets you control which members are active for a given document version, handle renamed keys, and pass version information to predicate and mapper methods.
-
-### BJsonVersionContext
-
-Declares the current document format version for the **entire type**. Applied at the type level.
+Use this when one fixed converter type should own the mapping.
 
 ```csharp
-[BJsonSerializable]
-[BJsonVersionContext(typeof(Version), "2.1.0")]
-public class SaveFile { ... }
-```
-
-The version type must implement `IComparable` and expose a static `Parse(string)` method.
-The value set here can be overridden per-call via `BJsonSerializerOptions.Version`.
-
-### BJsonVersion
-
-Controls inclusion of individual members based on a version range. Applied at member or type level.
-
-```csharp
-[BJsonSerializable]
-[BJsonVersionContext(typeof(Version), "2.1.0")]
-public class PlayerStats
+public sealed class DateOnlyStringConverter : BJsonConverter<DateTime>
 {
-	// Always present
-	public string Name { get; set; } = string.Empty;
+    public override BJsonValue Serialize(DateTime value, BJsonSerializationContext context)
+        => BJsonValue.Create(value.ToString("yyyy-MM-dd"));
 
-	// Introduced in v1.5 — absent for documents older than 1.5
-	[BJsonVersion(typeof(Version), introducedIn: "1.5.0")]
-	public int Level { get; set; }
+    public override DateTime Deserialize(BJsonValue value, BJsonSerializationContext context)
+        => DateTime.Parse(value.StringValue);
+}
 
-	// Existed from v1.0 to v2.0, removed after
-	[BJsonVersion(typeof(Version), introducedIn: "1.0.0", removedIn: "2.0.0")]
-	public int LegacyRank { get; set; }
+[BJsonSerializable]
+public sealed class AuditEntry
+{
+    [BJsonConverter(typeof(DateOnlyStringConverter))]
+    public DateTime CreatedAt { get; set; }
 }
 ```
 
-| Constructor parameter | Description |
-|---|---|
-| `versionType` | Concrete version type. Must implement `IComparable` + have `static Parse(string)`. |
-| `introducedIn` | First version this member appears in. `null` = always present. |
-| `removedIn` | First version this member is **absent** in (exclusive upper bound). `null` = never removed. |
+### `BJsonConverterFactory`
 
-A member is included when: `introducedIn <= currentVersion < removedIn`.
-If no version context is active, version constraints are ignored and all members participate.
-
-### RenamedFrom — Key Migration
-
-Use `RenamedFrom` to support reading old JSON keys during deserialization after a member is renamed:
+Use this when conversion depends on a closed generic or runtime type shape.
 
 ```csharp
-// In v2.0, "score" was renamed to "totalScore"
+[BJsonSerializable]
+public sealed class Envelope
+{
+    [BJsonConverterFactory(typeof(WrappedConverterFactory))]
+    public Wrapped<int> Count { get; set; }
+}
+```
+
+This is appropriate for patterns like `Wrapped<T>`, `Optional<T>`, or other generic wrappers.
+
+### `BJsonValueMapper`
+
+Use this when you want to transform the serialized `BJsonValue` representation rather than replace the entire converter.
+
+```csharp
+[BJsonValueMapper(nameof(MapHealth))]
+public int Health { get; set; }
+
+internal static BJsonValue MapHealth(BJsonValue value, string propertyName, IComparable? version, bool isReading)
+{
+    if (isReading && version is Version semantic && semantic < new Version(2, 0, 0))
+        return BJsonValue.Create(value.IntValue * 10);
+
+    return value;
+}
+```
+
+Accepted signatures:
+
+```csharp
+static BJsonValue Method(BJsonValue value, string propertyName, IComparable? version, bool isReading)
+static BJsonValue Method(BJsonValue value)
+```
+
+Source-generated serializers require the full 4-parameter signature.
+
+### `BJsonNumberHandling`
+
+Use this when a numeric wire contract uses strings or requires a stable textual representation.
+
+```csharp
+[BJsonNumberHandling(BJsonNumberHandling.AllowReadingFromString)]
+public int Count { get; set; }
+
+[BJsonNumberHandling(BJsonNumberHandling.AllowReadingFromString | BJsonNumberHandling.Lossless)]
+public decimal Amount { get; set; }
+```
+
+Meaning:
+
+- `AllowReadingFromString`: parse numeric strings during deserialization.
+- `WriteAsString`: emit numbers as strings during serialization.
+- `Lossless`: keep a string representation suitable for precise round-tripping.
+
+## Versioning Attributes
+
+### `BJsonVersionContext`
+
+Use this on a type to declare the default document version context.
+
+```csharp
+[BJsonSerializable]
+[BJsonVersionContext(typeof(Version), "2.1.0")]
+public sealed class SaveFile
+{
+    public string Name { get; set; } = string.Empty;
+}
+```
+
+This version is passed to:
+
+- `BJsonVersion`
+- `BJsonIgnoreWhen`
+- `BJsonRequiredWhen`
+- `BJsonValueMapper`
+- `BJsonDefaultProvider` version-aware overloads
+
+### `BJsonVersion`
+
+Use this to gate members or whole types by version.
+
+```csharp
+[BJsonVersion(typeof(Version), introducedIn: "2.0.0")]
+public sealed class ModernOnlyPayload
+{
+    public int Count { get; set; }
+}
+
+[BJsonVersion(typeof(Version), introducedIn: "1.5.0")]
+public int Level { get; set; }
+
 [BJsonVersion(typeof(Version), introducedIn: "2.0.0", RenamedFrom = "score")]
 public int TotalScore { get; set; }
 ```
 
-During deserialization, the engine tries `"totalScore"` first, then falls back to `"score"`.
+Rules:
 
-### Version Flow to Methods
+- `introducedIn` is inclusive.
+- `removedIn` is exclusive.
+- When no version context is active, version constraints are ignored.
+- `RenamedFrom` provides one legacy read-time key.
 
-The active `IComparable?` version is automatically passed to:
-- Static predicate methods referenced by `[BJsonIgnoreWhen]`
-- Static mapper methods referenced by `[BJsonValueMapper]`
-- *(Available for future use in `[BJsonDefaultProvider]` methods if a version-aware overload is added)*
+### `BJsonAlias`
 
-This allows a single method to implement version-conditional logic without additional configuration.
+Use this for additional legacy keys beyond `RenamedFrom`.
 
----
+```csharp
+[BJsonAlias("legacy_count")]
+[BJsonAlias("legacy_count_v2")]
+public int Count { get; set; }
+```
 
-## Instantiation
+Serialization still emits the current configured key only.
 
-### BJsonConstructor
+## Construction Attributes
 
-Designates which constructor to use during deserialization. Constructor parameters are matched to JSON properties by name (case-insensitive, respecting `NamingPolicy`).
+### `BJsonConstructor`
+
+Use this when object creation must go through a specific constructor.
 
 ```csharp
 [BJsonSerializable]
 public sealed class Coordinate
 {
-	[BJsonConstructor]
-	public Coordinate(double x, double y)
-	{
-		X = x;
-		Y = y;
-	}
+    [BJsonConstructor]
+    public Coordinate(double x, double y)
+    {
+        X = x;
+        Y = y;
+    }
 
-	public double X { get; }
-	public double Y { get; }
+    public double X { get; }
+    public double Y { get; }
 }
 ```
 
-Only one constructor may carry `[BJsonConstructor]`. Diagnostic `BJSON002` is emitted otherwise.
+Parameter names are matched to configured serialized names.
 
-### BJsonFactoryMethod
+### `BJsonFactoryMethod`
 
-Designates a **static method** as the deserialization factory, superseding `[BJsonConstructor]` when both are present.
-
-The method must be:
-- `static`
-- Return the declaring type (or a subtype)
-- Have parameters whose names match JSON properties (case-insensitive, respecting `NamingPolicy`)
-
-**Visibility requirement:** The method must be `internal` or `public` (not `private`) because the source generator emits a separate serializer class in the same assembly.
+Use this when materialization must go through a static factory instead of a constructor.
 
 ```csharp
 [BJsonSerializable]
 public sealed class Money
 {
-	private Money(decimal amount, string currency)
-	{
-		Amount = amount;
-		Currency = currency;
-	}
+    private Money(decimal amount, string currency)
+    {
+        Amount = amount;
+        Currency = currency;
+    }
 
-	public decimal Amount { get; }
-	public string Currency { get; }
+    public decimal Amount { get; }
+    public string Currency { get; }
 
-	[BJsonFactoryMethod]
-	internal static Money Create(decimal amount, string currency) => new(amount, currency);
+    [BJsonFactoryMethod]
+    internal static Money Create(decimal amount, string currency) => new(amount, currency);
 }
 ```
 
-**Parameter matching:**
-- Factory method parameters are matched to JSON properties by name (case-insensitive)
-- The matching respects `[BJsonPropertyName]` and `NamingPolicy` settings
-- If a parameter cannot be matched to a member, it reads directly from the JSON key with the parameter name
-- Parameters are extracted from JSON and passed to the factory method in order
-
-**Parameterless factory methods:**
-```csharp
-[BJsonFactoryMethod]
-internal static Config CreateDefault() => new Config { Port = 8080 };
-```
-
-Only one method per type may carry `[BJsonFactoryMethod]`.
-
----
-
-## Type-Level Control
-
-### BJsonSerializable
-
-Marks a type for BJson source generation and/or reflection-based serialization.
+Explicit parameter mapping is supported:
 
 ```csharp
-[BJsonSerializable(
-	IncludeFields = false,           // include public fields (default: false)
-	IncludePrivateMembers = false,   // include non-public members (default: false)
-	NamingPolicy = NamingPolicy.CamelCase)]
-public class MyModel { ... }
+[BJsonFactoryMethod(ParameterMapping = new[] { "x", "coord_x", "y", "coord_y" })]
+internal static Point Create(int x, int y) => new Point(x, y);
 ```
 
-`NamingPolicy` values: `Default`, `CamelCase`, `SnakeCase`, `KebabCase`.
+Rules:
 
-### BJsonConverter (type)
+- The method must be static.
+- The return type must be the declaring type or a subtype.
+- Multiple factory methods are invalid.
+- Reflection can discover private factory methods; generated serializers require callable visibility.
 
-Applies a custom `BJsonConverter<T>` to an entire type, used for all serialization of that type:
+## Polymorphism Attributes
 
-```csharp
-[BJsonConverter(typeof(ColorHexConverter))]
-public struct Color { ... }
-```
+### `BJsonPolymorphic`
 
-### BJsonPolymorphic
-
-Enables polymorphic serialization. A type discriminator property (`$type` by default) is written
-to identify the concrete type during serialization and read back during deserialization.
+Use this on a base class or interface to enable discriminator-based round trips.
 
 ```csharp
 [BJsonPolymorphic(TypeDiscriminatorPropertyName = "$kind")]
-[BJsonDerivedType(typeof(Dog), "dog")]
-[BJsonDerivedType(typeof(Cat), "cat")]
-public abstract class Animal
+[BJsonDerivedType(typeof(Mage), TypeDiscriminator = "mage")]
+[BJsonDerivedType(typeof(Warrior), TypeDiscriminator = "warrior")]
+public abstract class Character
 {
-	public string Name { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
 }
 ```
 
-### BJsonDerivedType
+### `BJsonDerivedType`
 
-Registers a derived type and its discriminator value. Applied to the base type, repeatable.
+Use this on the base type once per supported subtype.
 
 ```csharp
-[BJsonDerivedType(typeof(Dog))]            // uses type name as discriminator
-[BJsonDerivedType(typeof(Cat), "cat")]     // explicit discriminator value
+[BJsonDerivedType(typeof(SwordItem), TypeDiscriminator = "sword")]
+[BJsonDerivedType(typeof(BowItem), TypeDiscriminator = "bow")]
+public abstract class Item
+{
+}
 ```
 
-| Constructor parameter | Description |
-|---|---|
-| `derivedType` | The concrete derived type. |
-| `TypeDiscriminator` (property) | Optional explicit discriminator string. Uses type name if null. |
+### `BJsonDiscriminatorValue`
 
----
+Use this on the concrete type when you want the type to carry its own discriminator token.
 
-## DOM Preprocessing
+```csharp
+[BJsonDiscriminatorValue("mage")]
+public sealed class Mage : Character
+{
+    public int Mana { get; set; }
+}
+```
 
-The DOM preprocessor pipeline transforms the raw BJson DOM node **before** typed deserialization occurs. It enables conditional blocks, anchor resolution, variable substitution, and external file inclusion.
+This works well with `BJsonPolymorphic` and `BJsonDerivedType`.
 
-### BJsonPreprocessor
+## Preprocessor and External Reference Attributes
 
-Opts the type into DOM preprocessing. When applied without `PreprocessorType`, the built-in preprocessor is used.
+### `BJsonPreprocessor`
+
+Use this to enable raw DOM preprocessing before typed binding.
 
 ```csharp
 [BJsonSerializable]
 [BJsonPreprocessor]
-public class AppConfig { ... }
+public sealed class ThemeConfig
+{
+    public string PrimaryColor { get; set; } = string.Empty;
+}
+```
 
-// Custom preprocessor
+Supported built-in capabilities:
+
+- Variable substitution in strings
+- Conditional branch selection
+- Anchor registration and `$ref` replacement
+- External file inclusion
+
+Custom preprocessors can be plugged in:
+
+```csharp
 [BJsonSerializable]
 [BJsonPreprocessor(PreprocessorType = typeof(MyPreprocessor))]
-public class AppConfig { ... }
-```
-
-A custom preprocessor must implement `IBJsonPreprocessor`:
-
-```csharp
-public class MyPreprocessor : IBJsonPreprocessor
+public sealed class ThemeConfig
 {
-	public object Process(object node, IBJsonPreprocessorContext context)
-	{
-		context.SetVariable("env", "production");
-		// transform node...
-		return node;
-	}
 }
 ```
 
-### BJsonAnchor
+### `BJsonAnchor`
 
-Registers a member's value as a named anchor accessible anywhere in the same document via `{ "$ref": "anchorName" }`. Requires `[BJsonPreprocessor]` on the type.
+Use this when one member should become a named anchor visible to `$ref` nodes.
 
 ```csharp
 [BJsonSerializable]
 [BJsonPreprocessor]
-public class Theme
+public sealed class Theme
 {
-	[BJsonAnchor("primaryColor")]
-	public string Primary { get; set; } = "#0078D4";
+    [BJsonAnchor("primaryColor")]
+    public string PrimaryColor { get; set; } = "#22CC88";
 
-	// Other members in the JSON document can reference this value:
-	// "background": { "$ref": "primaryColor" }
+    public string Display { get; set; } = string.Empty;
 }
 ```
 
-### BJsonExternalRef
+Input payload example:
 
-Marks a member as a reference to an external BJson file.
+```json
+{
+  "PrimaryColor": "#22CC88",
+  "Display": { "$ref": "primaryColor" }
+}
+```
+
+After preprocessing, `Display` receives the same value as `PrimaryColor`.
+
+### `BJsonExternalRef`
+
+Use this when a member payload lives in a separate BJson file.
 
 ```csharp
-// Path resolved from the JSON string value at runtime
 [BJsonExternalRef]
 public LevelData? Level { get; set; }
 
-// Fixed path relative to the document root
 [BJsonExternalRef(FixedPath = "data/inventory.bjson")]
 public Inventory? Inventory { get; set; }
 
-// Missing file produces null instead of throwing
 [BJsonExternalRef(Optional = true)]
 public Settings? Settings { get; set; }
 ```
 
-During **deserialization**, the referenced file is loaded and deserialized in place.
-During **serialization**, the member is written to a separate file and replaced by a `{ "$ref": "path" }` token.
+Behavior:
 
-### Conditional Blocks Syntax
+- On read, the external file is loaded and deserialized into the member.
+- On write, the member payload is written to the target file and the current document stores a string path token.
+- `Optional = true` suppresses missing-file failures and yields `null` or default member value semantics instead.
 
-When `[BJsonPreprocessor]` is active, the built-in preprocessor supports `$if/$then/$elif/$else` blocks in the JSON document, resolved before typed deserialization:
+Path policy:
+
+```csharp
+var options = new BJsonSerializerOptions
+{
+    PreprocessorContext = new BJsonPreprocessorContext { BasePath = basePath },
+    ExternalReferencePathPolicy = ExternalReferencePathPolicy.RestrictToBasePath
+};
+```
+
+### Built-in conditional syntax
+
+The built-in preprocessor supports branch arrays through `$branches`.
 
 ```json
 {
-  "name": "Hero",
-  "$if":   { "$var": "Platform", "$eq": "PC" },
-  "$then": { "graphicsQuality": "Ultra" },
-  "$elif": { "$var": "Platform", "$eq": "Mobile" },
-  "$then": { "graphicsQuality": "Low" },
-  "$else": { "graphicsQuality": "Medium" }
+  "$branches": [
+    {
+      "$if": { "$var": "Platform", "$eq": "Desktop" },
+      "$then": {
+        "Mode": "high",
+        "DisplayColor": "#22CC88"
+      }
+    },
+    {
+      "$else": {
+        "Mode": "safe",
+        "DisplayColor": "#999999"
+      }
+    }
+  ]
 }
 ```
 
-Variables are set programmatically via `IBJsonPreprocessorContext.SetVariable(name, value)` before deserialization starts.
+Variables are supplied through `BJsonPreprocessorContext` before deserialization.
 
----
+## Lifecycle Attributes
+
+### `BJsonOnSerializing`
+
+Use this when the instance must normalize itself before write.
+
+```csharp
+[BJsonOnSerializing]
+internal void PrepareForWrite()
+{
+    UpdatedAt = DateTime.UtcNow;
+}
+```
+
+Accepted signatures:
+
+```csharp
+void Method()
+void Method(BJsonSerializationContext context)
+```
+
+### `BJsonOnDeserialized`
+
+Use this when the instance must repair invariants or populate caches after read.
+
+```csharp
+[BJsonOnDeserialized]
+internal void RebuildCache()
+{
+    CacheKey = Name.ToLowerInvariant();
+}
+```
+
+Accepted signatures:
+
+```csharp
+void Method()
+void Method(BJsonDeserializationContext context)
+```
 
 ## Source Generator Diagnostics
 
-The source generator emits the following diagnostics at compile time:
-
-| ID | Severity | Description |
+| ID | Severity | Meaning |
 |---|---|---|
-| `BJSON001` | Warning | `[BJsonExtensionData]` member type is not `IDictionary<string, BJsonValue>` |
-| `BJSON002` | Error | Multiple constructors carry `[BJsonConstructor]` |
-| `BJSON003` | Error | Multiple members carry `[BJsonExtensionData]` |
-| `BJSON004` | Warning | Custom converter type referenced by `[BJsonConverter]` was not found |
-| `BJSON005` | Warning | Two or more members would produce the same JSON key |
-| `BJSON006` | Warning | A constructor/factory parameter could not be matched to any member |
-| `BJSON007` | Warning | Method referenced by `[BJsonIgnoreWhen]`, `[BJsonValueMapper]`, or `[BJsonDefaultProvider]` was not found |
-| `BJSON008` | Warning | Referenced attribute method is not accessible from generated code (`public`, `internal`, or `protected internal` required) |
-| `BJSON009` | Warning | Referenced attribute method has an invalid signature |
-| `BJSON010` | Warning | Unsupported type shape for source generation (for example generic or nested type) |
+| `BJSON001` | Warning | Invalid `BJsonExtensionData` member type |
+| `BJSON002` | Error | Multiple constructors marked with `BJsonConstructor` |
+| `BJSON003` | Error | Multiple members marked with `BJsonExtensionData` |
+| `BJSON004` | Warning | Converter type referenced by `BJsonConverter` not found |
+| `BJSON005` | Warning | Conflicting effective JSON property names |
+| `BJSON006` | Warning | Constructor or factory parameter cannot be matched to a member |
+| `BJSON007` | Warning | Referenced helper method not found |
+| `BJSON008` | Warning | Referenced helper method is not accessible from generated code |
+| `BJSON009` | Warning | Referenced helper method has an invalid signature |
+| `BJSON010` | Warning | Unsupported type shape for source generation |
+| `BJSON012` | Warning | Invalid `BJsonFactoryMethod.ParameterMapping` declaration |
+| `BJSON013` | Warning | `BJsonDefaultValue` and `BJsonDefaultProvider` declared together |
+| `BJSON014` | Error | Multiple methods marked with `BJsonFactoryMethod` |
+| `BJSON015` | Error | Invalid `BJsonFactoryMethod` signature |
+| `BJSON016` | Warning | Invalid factory parameter mapping target |
 
----
-
-## Complete Worked Example
-
-The following example combines the version system, predicates, mappers, and default values in a realistic save-file type.
+## Complete Example
 
 ```csharp
 using System;
@@ -702,146 +748,73 @@ using Krampus.BinJson.Serialization;
 [BJsonPreprocessor]
 public sealed class CharacterSave
 {
-	// ── Basic members ────────────────────────────────────────────
+    [BJsonRequired]
+    public string Name { get; set; } = string.Empty;
 
-	[BJsonRequired]
-	public string Name { get; set; } = string.Empty;
+    [BJsonVersion(typeof(Version), introducedIn: "2.0.0", RenamedFrom = "score")]
+    [BJsonDefaultValue(0)]
+    public int TotalScore { get; set; }
 
-	// ── Version-controlled members ────────────────────────────────
+    [BJsonAlias("legacy_guild")]
+    public string? Guild { get; set; }
 
-	// Introduced in v1.5; documents before 1.5 receive default 1
-	[BJsonVersion(typeof(Version), introducedIn: "1.5.0")]
-	[BJsonDefaultValue(1)]
-	public int Level { get; set; }
+    [BJsonIgnoreWhen(nameof(ShouldIgnoreAuditTrail))]
+    public string AuditTrail { get; set; } = string.Empty;
 
-	// Existed from v1.0 to v2.0; ignore when writing in newer versions
-	[BJsonVersion(typeof(Version), introducedIn: "1.0.0", removedIn: "2.0.0")]
-	[BJsonIgnore(Condition = BJsonIgnoreCondition.WhenWritingDefault)]
-	public int LegacyRank { get; set; }
+    [BJsonValueMapper(nameof(MapHealth))]
+    public int Health { get; set; }
 
-	// Renamed from "score" to "total_score" in v2.0
-	[BJsonVersion(typeof(Version), introducedIn: "2.0.0", RenamedFrom = "score")]
-	[BJsonDefaultValue(0)]
-	public int TotalScore { get; set; }
+    [BJsonDefaultProvider(nameof(GetDefaultLoadout))]
+    public Loadout Loadout { get; set; } = new Loadout();
 
-	// ── Dynamic ignore ────────────────────────────────────────────
+    [BJsonAnchor("primary_name")]
+    public string DisplayName => Name;
 
-	// Skip empty guilds only in v3+ documents
-	[BJsonIgnoreWhen(nameof(ShouldIgnoreGuild))]
-	public string? Guild { get; set; }
+    [BJsonExternalRef(Optional = true)]
+    public CharacterState? ExternalState { get; set; }
 
-	internal static bool ShouldIgnoreGuild(object? value, string propertyName, IComparable? version)
-		=> version != null
-		   && version.CompareTo(new Version("3.0.0")) >= 0
-		   && string.IsNullOrEmpty(value as string);
+    [BJsonExtensionData]
+    public Dictionary<string, BJsonValue>? ExtraData { get; set; }
 
-	// ── Value mapping ─────────────────────────────────────────────
+    internal static bool ShouldIgnoreAuditTrail(object? value, string propertyName, IComparable? version)
+        => value is string text && string.IsNullOrWhiteSpace(text);
 
-	// v1.x stored health as percentage 0–100; v2+ uses raw HP integer
-	[BJsonValueMapper(nameof(MapHealth))]
-	[BJsonVersion(typeof(Version), introducedIn: "1.0.0")]
-	public int Health { get; set; }
+    internal static BJsonValue MapHealth(BJsonValue value, string propertyName, IComparable? version, bool isReading)
+    {
+        if (isReading && version is Version semantic && semantic < new Version(2, 0, 0))
+            return BJsonValue.Create(value.IntValue * 10);
 
-	internal static BJsonValue MapHealth(BJsonValue value, string propertyName, IComparable? version, bool isReading)
-	{
-		if (isReading && version != null && version.CompareTo(new Version("2.0.0")) < 0)
-			return BJsonValue.Create(value.IntValue * 10); // percentage → raw HP
-		return value;
-	}
+        return value;
+    }
 
-	// ── Complex default ───────────────────────────────────────────
+    internal static Loadout GetDefaultLoadout(IComparable? version)
+        => new Loadout { Weapon = "Sword", Armor = "Leather" };
 
-	[BJsonVersion(typeof(Version), introducedIn: "2.5.0")]
-	[BJsonDefaultProvider(nameof(GetDefaultLoadout))]
-	public Loadout Loadout { get; set; } = new Loadout();
-
-	internal static Loadout GetDefaultLoadout() => new Loadout { Weapon = "Sword", Armor = "Leather" };
-
-	// ── Extension data (forward compatibility) ────────────────────
-
-	[BJsonExtensionData]
-	public Dictionary<string, BJsonValue>? Extra { get; set; }
-
-	// ── Anchor for $ref resolution ────────────────────────────────
-
-	[BJsonAnchor("charName")]
-	public string DisplayName => Name;
+    [BJsonOnDeserialized]
+    internal void NormalizeAfterRead()
+    {
+        Guild ??= "none";
+    }
 }
 
 [BJsonSerializable]
 public sealed class Loadout
 {
-	public string Weapon { get; set; } = string.Empty;
-	public string Armor  { get; set; } = string.Empty;
-}
-
-// ── Polymorphic base ──────────────────────────────────────────────
-
-[BJsonPolymorphic(TypeDiscriminatorPropertyName = "$kind")]
-[BJsonDerivedType(typeof(SwordItem), "sword")]
-[BJsonDerivedType(typeof(BowItem),   "bow")]
-public abstract class Item
-{
-	public string Id { get; set; } = string.Empty;
+    public string Weapon { get; set; } = string.Empty;
+    public string Armor { get; set; } = string.Empty;
 }
 
 [BJsonSerializable]
-public sealed class SwordItem : Item
+public sealed class CharacterState
 {
-	public int Damage { get; set; }
-}
-
-[BJsonSerializable]
-public sealed class BowItem : Item
-{
-	public float Range { get; set; }
-}
-
-// ── Factory method ────────────────────────────────────────────────
-
-[BJsonSerializable]
-public sealed class Currency
-{
-	private Currency(decimal amount, string code)
-	{
-		Amount = amount;
-		Code   = code;
-	}
-
-	public decimal Amount { get; }
-	public string  Code   { get; }
-
-	[BJsonFactoryMethod]
-	public static Currency Create(decimal amount, string code) => new(amount, code);
+    public int Power { get; set; }
+    public string Flags { get; set; } = string.Empty;
 }
 ```
 
-### Serialization
+Related guides:
 
-```csharp
-var character = new CharacterSave
-{
-	Name      = "Aria",
-	Level     = 42,
-	TotalScore = 9800,
-	Health    = 350,
-	Loadout   = new Loadout { Weapon = "Longbow", Armor = "Chainmail" }
-};
-
-BJsonValue bson  = BJson.Serialize(character);
-string     json  = BJson.Stringify(character);
-byte[]     bytes = BJson.SerializeToBytes<CharacterSave>(character);
-```
-
-### Deserialization
-
-```csharp
-// From JSON text (v1.x legacy document)
-string legacyJson = """{"name":"Aria","score":980,"health":35}""";
-CharacterSave legacy = BJson.Parse<CharacterSave>(legacyJson)!;
-// legacy.TotalScore == 980 (read from "score" via RenamedFrom)
-// legacy.Health     == 350 (mapped: 35 * 10)
-
-// From bytes
-CharacterSave fromBytes = BJson.Deserialize<CharacterSave>(bytes)!;
-```
+- `docs/Extensibility.md`
+- `docs/CompatibilityNotes.md`
+- `docs/MigrationRecipes.md`
+- `docs/ErrorHandling.md`

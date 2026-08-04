@@ -31,6 +31,17 @@ It currently includes:
 - **Configurable pretty-printing** for readable JSON output.
 - **Binary value validation**: binary values are forbidden by default in JSON text output.
 
+## Specialized Facades (Phase C)
+
+BinJson now exposes specialized facades to reduce API surface per use case while preserving `BJson` as the general entry point for compatibility:
+
+- `BJsonBinaryFacade`: binary DOM read/write, binary visitor, selective root-property reads, binary file I/O.
+- `BJsonTextFacade`: JSON text parse/stringify, text visitor, selective root-property reads, text file I/O.
+- `BJsonTypedFacade`: CLR object serialization/deserialization workflows over DOM, binary, and text flows.
+- `BJsonDomFacade`: DOM-only tree operations such as recursive transforms.
+
+`BJson` remains available as the generic facade and compatibility layer over these workflows.
+
 ## Sync and Async Architecture
 
 BinJson uses an explicit split between synchronous and asynchronous APIs for text and binary I/O.
@@ -209,7 +220,7 @@ public sealed class SaveData
     [BJsonPropertyName("player_name")]
     public string PlayerName { get; set; } = string.Empty;
 
-    [BJsonIgnore(Condition = BJsonIgnoreCondition.WhenDefault)]
+    [BJsonIgnore(Condition = BJsonIgnoreCondition.WhenWritingDefault)]
     public int Level { get; set; }
 }
 ```
@@ -278,6 +289,23 @@ public sealed class PlayerState : IBJsonSerializable, IBJsonDeserializable
 | Interfaces | Fully custom payloads | Complete control over read/write behavior | More manual code and maintenance |
 
 For a complete guide, see [docs/Extensibility.md](docs/Extensibility.md).
+
+## Attribute System
+
+BinJson exposes a broad attribute system for contract shaping, defaults, validation, versioning, polymorphism, preprocessing, lifecycle hooks, and external references.
+
+Major categories include:
+
+- Contract shape: `BJsonSerializable`, `BJsonProperty`, `BJsonPropertyName`, `BJsonInclude`, `BJsonExtensionData`
+- Validation and defaults: `BJsonRequired`, `BJsonRequiredWhen`, `BJsonIgnore`, `BJsonIgnoreWhen`, `BJsonDefaultValue`, `BJsonDefaultProvider`
+- Conversion: `BJsonConverter`, `BJsonConverterFactory`, `BJsonValueMapper`, `BJsonNumberHandling`
+- Versioning: `BJsonVersionContext`, `BJsonVersion`, `BJsonAlias`
+- Construction: `BJsonConstructor`, `BJsonFactoryMethod`
+- Polymorphism: `BJsonPolymorphic`, `BJsonDerivedType`, `BJsonDiscriminatorValue`
+- Preprocessing and external resources: `BJsonPreprocessor`, `BJsonAnchor`, `BJsonExternalRef`
+- Lifecycle: `BJsonOnSerializing`, `BJsonOnDeserialized`
+
+See [docs/Attributes.md](docs/Attributes.md) for the complete reference with precedence rules and examples.
 
 ## Main API
 
@@ -394,9 +422,16 @@ BinJson includes a C# source generator that emits high-performance serializers f
 | `[BJsonFactoryMethod]` | Designates a static factory method for deserialization; supersedes `[BJsonConstructor]` |
 | `[BJsonPolymorphic]` | Enables polymorphic serialization with type discriminators |
 | `[BJsonDerivedType]` | Registers derived type with discriminator value |
+| `[BJsonDiscriminatorValue]` | Declares the discriminator token for a concrete derived type |
 | `[BJsonPreprocessor]` | Enables DOM pre-processing (conditionals, anchor resolution, variable substitution) before typed deserialization |
 | `[BJsonAnchor]` | Registers a member value as a named anchor for `{ "$ref": "name" }` resolution within the document |
 | `[BJsonExternalRef]` | Member is loaded from / written to an external BJson file |
+| `[BJsonAlias]` | Accepts additional legacy read-time names for a member |
+| `[BJsonRequiredWhen]` | Makes a member conditionally required via a static helper method |
+| `[BJsonConverterFactory]` | Resolves converters from a factory, useful for generic wrappers |
+| `[BJsonNumberHandling]` | Enables numeric string interoperability and lossless number writes |
+| `[BJsonOnSerializing]` | Runs an instance hook before serialization |
+| `[BJsonOnDeserialized]` | Runs an instance hook after deserialization |
 
 ### Diagnostics
 
@@ -414,6 +449,11 @@ The generator reports issues at compile time:
 | BJSON008 | Referenced attribute method is not accessible from generated code |
 | BJSON009 | Referenced attribute method has invalid signature |
 | BJSON010 | Unsupported type shape for source generation (for example generic or nested) |
+| BJSON012 | Invalid `[BJsonFactoryMethod(ParameterMapping=...)]` declaration |
+| BJSON013 | Conflicting `[BJsonDefaultValue]` and `[BJsonDefaultProvider]` on same member |
+| BJSON014 | Multiple methods marked with `[BJsonFactoryMethod]` in the same type |
+| BJSON015 | Invalid `[BJsonFactoryMethod]` signature |
+| BJSON016 | Invalid `[BJsonFactoryMethod(ParameterMapping=...)]` target (unknown/duplicate parameter or duplicate JSON key) |
 
 ## Performance
 
@@ -422,6 +462,7 @@ The project includes basic performance tests (`BJsonPerformanceTests`) that veri
 - The binary format is competitive in size with JSON text, depending on the payload.
 - DOM construction is fast (1000 small objects in under 500ms).
 - **Source-generated serializers** eliminate reflection overhead for attributed types.
+- **BJsonRuntime** keeps metadata and converter caches warm for repeated operations under one stable configuration.
 
 ## Additional Documentation
 
@@ -430,4 +471,7 @@ The project includes basic performance tests (`BJsonPerformanceTests`) that veri
 - Extensibility guide: `docs/Extensibility.md`
 - Error handling and error code catalog: `docs/ErrorHandling.md`
 - **Attribute system reference & tutorial: `docs/Attributes.md`**
+- Attribute compatibility notes: `docs/CompatibilityNotes.md`
+- Attribute migration recipes: `docs/MigrationRecipes.md`
+- Release readiness checklist: `docs/ReleaseReadiness.md`
 - Sync/async implementation architecture: `docs/Architecture.md`

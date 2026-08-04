@@ -10,6 +10,16 @@ This document describes the internal separation strategy for synchronous and asy
 
 ## Public Types
 
+### Facade Layer
+
+- `BJson`: generic compatibility facade (broad API surface)
+- `BJsonBinaryFacade`: binary-focused facade
+- `BJsonTextFacade`: text-focused facade
+- `BJsonTypedFacade`: CLR object-focused facade
+- `BJsonDomFacade`: DOM-focused utility facade
+
+The specialized facades are preferred for new code when a workflow is domain-specific, because they improve discoverability and keep call sites focused.
+
 ### Binary
 
 - Sync: `BJsonBinaryReader`, `BJsonBinaryWriter`

@@ -88,8 +88,35 @@ namespace Krampus.BinJson.SourceGenerators
                 }
                 code.AppendLine();
 
+                if (model.Configuration.IsPolymorphic)
+                {
+                    code.AppendLine($"if (value.GetType() != typeof({model.TypeName}))");
+                    using (code.Scope())
+                    {
+                        code.AppendLine("return BJson.Serialize(value, value.GetType(), context.Options);");
+                    }
+                    code.AppendLine();
+                }
+
+                if (model.Configuration.HasOnSerializingHooks)
+                {
+                    code.AppendLine("Krampus.BinJson.Serialization.BJsonAttributeRuntimeSupport.InvokeOnSerializingHooks(value, context);");
+                    code.AppendLine();
+                }
+
                 // Create BJsonObject
                 code.AppendLine("var obj = new BJsonObject();");
+                var discriminatorPropertyName = model.Configuration.IsPolymorphic
+                    ? model.Configuration.TypeDiscriminatorPropertyName
+                    : model.Configuration.InheritedPolymorphicDiscriminatorPropertyName;
+                if (!string.IsNullOrWhiteSpace(discriminatorPropertyName))
+                {
+                    var discriminatorValueExpression = model.Configuration.IsPolymorphic
+                        ? $"value.GetType().FullName ?? typeof({model.TypeName}).FullName!"
+                        : $"\"{EscapeString(model.Configuration.InheritedPolymorphicDiscriminatorValue ?? model.FullTypeName)}\"";
+
+                    code.AppendLine($"obj[\"{EscapeString(discriminatorPropertyName!)}\"] = BJsonValue.Create({discriminatorValueExpression});");
+                }
                 code.AppendLine();
 
                 // Version local for predicates / mappers
@@ -135,6 +162,14 @@ namespace Krampus.BinJson.SourceGenerators
             var jsonName = member.JsonName ?? member.MemberName;
             var memberAccess = $"value.{member.MemberName}";
 
+            var hasTypeVersionGuard = model.Configuration.TypeVersionRange != null;
+
+            // Type-level version range guard
+            if (hasTypeVersionGuard)
+            {
+                EmitVersionGuardOpen(code, model.Configuration.TypeVersionRange!, versionFieldMap);
+            }
+
             // Version range guard
             if (member.Version != null)
             {
@@ -151,10 +186,19 @@ namespace Krampus.BinJson.SourceGenerators
                 }
             }
             else if (member.IgnoreCondition == IgnoreCondition.WhenWritingDefault
-                     || member.IgnoreCondition == IgnoreCondition.WhenWritingCustomDefault)
+                     || (member.IgnoreCondition == IgnoreCondition.WhenWritingCustomDefault && member.DefaultValue?.HasProviderMethod != true))
             {
                 var typeString = code.FormatTypeName(member.MemberType);
                 code.AppendLine($"if (!EqualityComparer<{typeString}>.Default.Equals({memberAccess}, default({typeString})))");
+                using (code.Scope())
+                {
+                    EmitSerializeWithPredicate(code, jsonName, memberAccess, member, model);
+                }
+            }
+            else if (member.IgnoreCondition == IgnoreCondition.WhenWritingCustomDefault)
+            {
+                var typeString = code.FormatTypeName(member.MemberType);
+                code.AppendLine($"if (!EqualityComparer<{typeString}>.Default.Equals({memberAccess}, ({typeString})(object){GetDefaultProviderInvocationExpression(member, model)}!))");
                 using (code.Scope())
                 {
                     EmitSerializeWithPredicate(code, jsonName, memberAccess, member, model);
@@ -171,6 +215,11 @@ namespace Krampus.BinJson.SourceGenerators
             }
 
             if (member.Version != null)
+            {
+                EmitVersionGuardClose(code);
+            }
+
+            if (hasTypeVersionGuard)
             {
                 EmitVersionGuardClose(code);
             }
@@ -201,6 +250,10 @@ namespace Krampus.BinJson.SourceGenerators
             {
                 valueExpr = $"{GetCustomConverterFieldName(member)}.Serialize({memberAccess}, context)";
             }
+            else if (member.CustomConverterFactoryType != null)
+            {
+                valueExpr = $"{GetCustomConverterFieldName(member)}.Serialize({memberAccess}, context)";
+            }
             else
             {
                 valueExpr = GetSerializationExpression(member.MemberType, memberAccess, "context");
@@ -209,6 +262,9 @@ namespace Krampus.BinJson.SourceGenerators
             // Value mapper (write direction)
             if (member.ValueMapperMethod != null)
                 valueExpr = $"{model.TypeName}.{member.ValueMapperMethod}({valueExpr}, \"{jsonName}\", _version, false)";
+
+            if (member.NumberHandling != 0)
+                valueExpr = $"Krampus.BinJson.Serialization.BJsonAttributeRuntimeSupport.ApplyNumberHandlingOnWrite({valueExpr}, {memberAccess}, {member.NumberHandling})";
 
             code.AppendLine($"obj[\"{jsonName}\"] = {valueExpr};");
         }
@@ -308,6 +364,42 @@ namespace Krampus.BinJson.SourceGenerators
                 code.AppendLine("var obj = value.ObjectValue;");
                 code.AppendLine();
 
+                if (model.Configuration.IsPolymorphic && model.Configuration.DerivedTypes.Count > 0)
+                {
+                    code.AppendLine($"if (obj.TryGetValue(\"{model.Configuration.TypeDiscriminatorPropertyName}\", out var _typeDiscriminatorToken) && _typeDiscriminatorToken.TryGetString(out var _typeDiscriminator))");
+                    using (code.Scope())
+                    {
+                        foreach (var derived in model.Configuration.DerivedTypes)
+                        {
+                            var derivedTypeName = derived.DerivedType;
+                            var discriminator = derived.TypeDiscriminator ?? derived.DerivedType;
+                            code.AppendLine($"if (string.Equals(_typeDiscriminator, \"{EscapeString(discriminator)}\", StringComparison.Ordinal) || string.Equals(_typeDiscriminator, \"{EscapeString(derivedTypeName)}\", StringComparison.Ordinal))");
+                            using (code.Scope())
+                            {
+                                code.AppendLine($"return ({model.TypeName}?)BJson.Deserialize(value, typeof({derivedTypeName}), context.Options);");
+                            }
+                        }
+
+                        code.AppendLine($"if (!string.Equals(_typeDiscriminator, typeof({model.TypeName}).FullName, StringComparison.Ordinal))");
+                        using (code.Scope())
+                        {
+                            code.AppendLine("var _resolvedDiscriminatorType = Type.GetType(_typeDiscriminator, throwOnError: false); ");
+                            code.AppendLine($"if (_resolvedDiscriminatorType != null && typeof({model.TypeName}).IsAssignableFrom(_resolvedDiscriminatorType) && _resolvedDiscriminatorType != typeof({model.TypeName}))");
+                            using (code.Scope())
+                            {
+                                code.AppendLine($"return ({model.TypeName}?)BJson.Deserialize(value, _resolvedDiscriminatorType, context.Options);");
+                            }
+                        }
+                    }
+                    code.AppendLine();
+                }
+
+                if (model.Configuration.IsPolymorphic && model.IsAbstract)
+                {
+                    code.AppendLine("return null;");
+                    code.AppendLine();
+                }
+
                 // Version local for predicates / mappers
                 if (NeedsVersionLocal(model))
                     EmitVersionLocal(code, model);
@@ -319,7 +411,7 @@ namespace Krampus.BinJson.SourceGenerators
                     .ToList();
 
                 // Track which properties were actually present in JSON (for required validation)
-                var requiredMembers = members.Where(m => m.IsRequired).ToList();
+                var requiredMembers = members.Where(m => m.IsRequired || m.RequiredWhenMethod != null).ToList();
                 if (requiredMembers.Any())
                 {
                     code.Comment("Track presence of required members");
@@ -356,7 +448,13 @@ namespace Krampus.BinJson.SourceGenerators
                 if (requiredMembers.Any())
                 {
                     code.AppendLine();
-                    EmitRequiredMemberValidation(code, requiredMembers);
+                    EmitRequiredMemberValidation(code, requiredMembers, model);
+                }
+
+                if (model.Configuration.HasOnDeserializedHooks)
+                {
+                    code.AppendLine();
+                    code.AppendLine("Krampus.BinJson.Serialization.BJsonAttributeRuntimeSupport.InvokeOnDeserializedHooks(instance!, context);");
                 }
 
                 code.AppendLine();
@@ -398,6 +496,8 @@ namespace Krampus.BinJson.SourceGenerators
             var paramList = string.Join(", ", parameters.Select(p => p.IsNullable || p.IsValueType ? p.ParameterName : $"{p.ParameterName}!"));
             if (!string.IsNullOrEmpty(model.Configuration.FactoryMethodName))
                 code.AppendLine($"var instance = {model.TypeName}.{model.Configuration.FactoryMethodName}({paramList});");
+            else if (model.IsAbstract)
+                code.AppendLine($"var instance = default({model.TypeName});");
             else
                 code.AppendLine($"var instance = new {model.TypeName}({paramList});");
             code.AppendLine();
@@ -426,6 +526,8 @@ namespace Krampus.BinJson.SourceGenerators
             code.Comment("Create instance");
             if (!string.IsNullOrEmpty(model.Configuration.FactoryMethodName))
                 code.AppendLine($"var instance = {model.TypeName}.{model.Configuration.FactoryMethodName}();");
+            else if (model.IsAbstract)
+                code.AppendLine($"var instance = default({model.TypeName});");
             else
                 code.AppendLine($"var instance = new {model.TypeName}();");
             code.AppendLine();
@@ -438,6 +540,11 @@ namespace Krampus.BinJson.SourceGenerators
                     EmitPropertyDeserialization(code, member, requiredMembers.Contains(member), model, versionFieldMap);
                 }
             }
+        }
+
+        private static string EscapeString(string value)
+        {
+            return value.Replace("\\", "\\\\").Replace("\"", "\\\"");
         }
 
         private static void EmitParameterExtraction(CodeBuilder code, ConstructorParameterModel param, string jsonName, bool isRequired)
@@ -462,6 +569,13 @@ namespace Krampus.BinJson.SourceGenerators
             var legacyName = member.Version?.RenamedFrom;
             var varName = $"{member.MemberName}Value";
             var typeName = member.MemberType;
+            var requiredCondition = BuildRequiredConditionExpression(member, model);
+
+            var hasTypeVersionGuard = model.Configuration.TypeVersionRange != null;
+
+            // Type-level version range guard
+            if (hasTypeVersionGuard)
+                EmitVersionGuardOpen(code, model.Configuration.TypeVersionRange!, versionFieldMap);
 
             // Version range guard
             if (member.Version != null)
@@ -469,26 +583,33 @@ namespace Krampus.BinJson.SourceGenerators
 
             // Build TryGetValue condition (with optional legacy name fallback)
             string tryGetCondition;
+            var tryGetParts = new List<string> { $"obj.TryGetValue(\"{jsonName}\", out var {varName})" };
             if (legacyName != null)
-                tryGetCondition = $"obj.TryGetValue(\"{jsonName}\", out var {varName}) || obj.TryGetValue(\"{legacyName}\", out {varName})";
-            else
-                tryGetCondition = $"obj.TryGetValue(\"{jsonName}\", out var {varName})";
+                tryGetParts.Add($"obj.TryGetValue(\"{legacyName}\", out {varName})");
+            foreach (var alias in member.Aliases)
+                tryGetParts.Add($"obj.TryGetValue(\"{EscapeString(alias)}\", out {varName})");
+            tryGetCondition = string.Join(" || ", tryGetParts);
 
             code.AppendLine($"if ({tryGetCondition})");
             using (code.Scope())
             {
-                // Predicate check
-                if (member.IgnoreWhenMethod != null)
+                if (member.DefaultValue != null && member.IsValueType && !member.IsNullable)
                 {
-                    code.AppendLine($"if (!{model.TypeName}.{member.IgnoreWhenMethod}({varName}, \"{jsonName}\", _version))");
+                    code.AppendLine($"if ({varName}.IsNull)");
                     using (code.Scope())
                     {
-                        EmitDeserializeAssignment(code, member, varName, isRequired, model);
+                        EmitDefaultAssignment(code, member, model, typeName);
+                        EmitRequiredPresenceMark(code, member, isRequired, requiredCondition);
+                    }
+                    code.AppendLine("else");
+                    using (code.Scope())
+                    {
+                        EmitDeserializationBody(code, member, isRequired, requiredCondition, model, varName, jsonName);
                     }
                 }
                 else
                 {
-                    EmitDeserializeAssignment(code, member, varName, isRequired, model);
+                    EmitDeserializationBody(code, member, isRequired, requiredCondition, model, varName, jsonName);
                 }
             }
 
@@ -498,18 +619,8 @@ namespace Krampus.BinJson.SourceGenerators
                 code.AppendLine("else");
                 using (code.Scope())
                 {
-                    if (member.DefaultValue.HasProviderMethod)
-                    {
-                        code.AppendLine($"instance.{member.MemberName} = ({typeName})(object){model.TypeName}.{member.DefaultValue.ProviderMethod}()!;");
-                    }
-                    else if (member.DefaultValue.HasConstant)
-                    {
-                        var constVal = FormatConstantLiteral(member.DefaultValue.ConstantValue);
-                        code.AppendLine($"instance.{member.MemberName} = ({typeName})(object){constVal}!;");
-                    }
-
-                    if (isRequired)
-                        code.AppendLine($"_has_{member.MemberName} = true;");
+                    EmitDefaultAssignment(code, member, model, typeName);
+                    EmitRequiredPresenceMark(code, member, isRequired, requiredCondition);
                 }
             }
             else if (isRequired)
@@ -517,15 +628,62 @@ namespace Krampus.BinJson.SourceGenerators
                 code.AppendLine("else");
                 using (code.Scope())
                 {
-                    code.AppendLine($"throw new Krampus.BinJson.Error.BJsonValidationException($\"Required member '{jsonName}' was not present in the JSON.\");");
+                    if (requiredCondition == "true")
+                    {
+                        code.AppendLine($"throw new Krampus.BinJson.Error.BJsonValidationException($\"Required member '{jsonName}' was not present in the JSON.\");");
+                    }
+                    else
+                    {
+                        code.AppendLine($"if (context.Options.StrictMode && ({requiredCondition}))");
+                        using (code.Scope())
+                        {
+                            code.AppendLine($"throw new Krampus.BinJson.Error.BJsonValidationException($\"Required member '{jsonName}' was not present in the JSON.\");");
+                        }
+                    }
                 }
             }
 
             if (member.Version != null)
                 EmitVersionGuardClose(code);
+
+            if (hasTypeVersionGuard)
+                EmitVersionGuardClose(code);
         }
 
-        private static void EmitDeserializeAssignment(CodeBuilder code, MemberModel member, string varName, bool isRequired, GeneratedTypeModel model)
+        private static void EmitDeserializationBody(CodeBuilder code, MemberModel member, bool isRequired, string? requiredCondition, GeneratedTypeModel model, string varName, string jsonName)
+        {
+                // Predicate check
+                if (member.IgnoreWhenMethod != null)
+                {
+                    code.AppendLine($"if (!{model.TypeName}.{member.IgnoreWhenMethod}({varName}, \"{jsonName}\", _version))");
+                    using (code.Scope())
+                    {
+                        EmitDeserializeAssignment(code, member, varName, isRequired, requiredCondition, model);
+                    }
+                }
+                else
+                {
+                    EmitDeserializeAssignment(code, member, varName, isRequired, requiredCondition, model);
+                }
+        }
+
+        private static void EmitDefaultAssignment(CodeBuilder code, MemberModel member, GeneratedTypeModel model, string typeName)
+        {
+            if (member.DefaultValue == null)
+                return;
+
+            if (member.DefaultValue.HasProviderMethod)
+            {
+                code.AppendLine($"instance.{member.MemberName} = ({typeName})(object){GetDefaultProviderInvocationExpression(member, model)}!;");
+            }
+            else if (member.DefaultValue.HasConstant)
+            {
+                var constVal = FormatConstantLiteral(member.DefaultValue.ConstantValue);
+                code.AppendLine($"instance.{member.MemberName} = ({typeName})(object){constVal}!;");
+            }
+        }
+
+        private static void EmitDeserializeAssignment(CodeBuilder code, MemberModel member, string varName, bool isRequired, string? requiredCondition, GeneratedTypeModel model)
         {
             // Value mapper (read direction) before deserialization
             string inputVar = varName;
@@ -539,10 +697,47 @@ namespace Krampus.BinJson.SourceGenerators
             {
                 code.AppendLine($"instance.{member.MemberName} = {GetCustomConverterFieldName(member)}.Deserialize({inputVar}, context);");
             }
+            else if (member.CustomConverterFactoryType != null)
+            {
+                code.AppendLine($"instance.{member.MemberName} = {GetCustomConverterFieldName(member)}.Deserialize({inputVar}, context);");
+            }
             else
             {
                 var deserializationCode = GetDeserializationExpression(member.MemberType, inputVar, "context");
                 var requiresNullGuard = !member.IsNullable && !member.IsValueType && UsesContextDeserialize(member.MemberType);
+
+                if (member.NumberHandling != 0)
+                {
+                    var numericTypeName = code.FormatTypeName(member.MemberType);
+                    if (!member.IsValueType && numericTypeName.EndsWith("?", StringComparison.Ordinal))
+                        numericTypeName = numericTypeName.Substring(0, numericTypeName.Length - 1);
+
+                    code.AppendLine($"if (Krampus.BinJson.Serialization.BJsonAttributeRuntimeSupport.TryDeserializeNumericMember({inputVar}, typeof({numericTypeName}), {member.NumberHandling}, out var parsed{member.MemberName}))");
+                    using (code.Scope())
+                    {
+                        code.AppendLine($"instance.{member.MemberName} = ({code.FormatTypeName(member.MemberType)})parsed{member.MemberName}!;");
+                    }
+                    code.AppendLine("else");
+                    using (code.Scope())
+                    {
+                        if (requiresNullGuard)
+                        {
+                            code.AppendLine($"var deserialized{member.MemberName} = {deserializationCode};");
+                            code.AppendLine($"if (deserialized{member.MemberName} != null)");
+                            using (code.Scope())
+                            {
+                                code.AppendLine($"instance.{member.MemberName} = deserialized{member.MemberName};");
+                            }
+                        }
+                        else
+                        {
+                            code.AppendLine($"instance.{member.MemberName} = {deserializationCode};");
+                        }
+                    }
+
+                    EmitRequiredPresenceMark(code, member, isRequired, requiredCondition);
+                    return;
+                }
 
                 if (requiresNullGuard)
                 {
@@ -559,8 +754,7 @@ namespace Krampus.BinJson.SourceGenerators
                 }
             }
 
-            if (isRequired)
-                code.AppendLine($"_has_{member.MemberName} = true;");
+            EmitRequiredPresenceMark(code, member, isRequired, requiredCondition);
         }
 
         /// <summary>
@@ -738,14 +932,15 @@ namespace Krampus.BinJson.SourceGenerators
         /// <summary>
         /// Emit validation checks for required members
         /// </summary>
-        private static void EmitRequiredMemberValidation(CodeBuilder code, List<MemberModel> requiredMembers)
+        private static void EmitRequiredMemberValidation(CodeBuilder code, List<MemberModel> requiredMembers, GeneratedTypeModel model)
         {
             code.Comment("Validate required members");
 
             foreach (var member in requiredMembers)
             {
                 var jsonName = member.JsonName ?? member.MemberName;
-                code.AppendLine($"if (!_has_{member.MemberName})");
+                var requiredCondition = BuildRequiredConditionExpression(member, model) ?? "false";
+                code.AppendLine($"if (({requiredCondition}) && !_has_{member.MemberName})");
                 using (code.Scope())
                 {
                     code.AppendLine($"throw new Krampus.BinJson.Error.BJsonValidationException($\"Required member '{jsonName}' was not present in the JSON.\");");
@@ -758,9 +953,16 @@ namespace Krampus.BinJson.SourceGenerators
             if (model.Configuration.VersionContext != null)
                 return true;
 
+            if (model.Configuration.TypeVersionRange != null)
+                return true;
+
             foreach (var member in model.AllMembers)
             {
-                if (member.Version != null || member.IgnoreWhenMethod != null || member.ValueMapperMethod != null)
+                if (member.Version != null
+                    || member.IgnoreWhenMethod != null
+                    || member.ValueMapperMethod != null
+                    || member.RequiredWhenMethod != null
+                    || member.DefaultValue?.ProviderAcceptsVersion == true)
                     return true;
             }
 
@@ -772,7 +974,7 @@ namespace Krampus.BinJson.SourceGenerators
             var vc = model.Configuration.VersionContext;
             if (vc == null)
             {
-                code.AppendLine("System.IComparable? _version = null;");
+                code.AppendLine("System.IComparable? _version = context.Options?.Version;");
             }
             else
             {
@@ -786,15 +988,34 @@ namespace Krampus.BinJson.SourceGenerators
         private static IReadOnlyDictionary<string, string>? EmitCachedVersionFields(CodeBuilder code, GeneratedTypeModel model)
         {
             var vc = model.Configuration.VersionContext;
-            if (vc == null)
-            return null; // No version context, nothing to cache
+            var typeRange = model.Configuration.TypeVersionRange;
 
             // Collect all unique versions mentioned in the type
             var versions = new HashSet<string>(StringComparer.Ordinal);
 
+            string? versionTypeName = vc?.VersionTypeName;
+
+            if (versionTypeName == null)
+            {
+                versionTypeName = typeRange?.VersionTypeName
+                    ?? model.AllMembers.FirstOrDefault(m => m.Version != null)?.Version?.VersionTypeName;
+            }
+
+            if (versionTypeName == null)
+                return null;
+
             // Add the context version
-            if (!string.IsNullOrEmpty(vc.IntroducedIn))
+            if (vc != null && !string.IsNullOrEmpty(vc.IntroducedIn))
                 versions.Add(vc.IntroducedIn!);
+
+            // Add type-level version boundaries
+            if (typeRange != null)
+            {
+                if (!string.IsNullOrEmpty(typeRange.IntroducedIn))
+                    versions.Add(typeRange.IntroducedIn!);
+                if (!string.IsNullOrEmpty(typeRange.RemovedIn))
+                    versions.Add(typeRange.RemovedIn!);
+            }
 
             // Add all member version boundaries
             foreach (var member in model.AllMembers)
@@ -816,7 +1037,7 @@ namespace Krampus.BinJson.SourceGenerators
             var versionFieldMap = new Dictionary<string, string>(StringComparer.Ordinal);
 
             // Emit the main context version (always present if we have a version context)
-            if (!string.IsNullOrEmpty(vc.IntroducedIn))
+            if (vc != null && !string.IsNullOrEmpty(vc.IntroducedIn))
             {
                 code.AppendLine($"private static readonly System.IComparable _cachedContextVersion = {vc.VersionTypeName}.Parse(\"{vc.IntroducedIn}\");");
                 versionFieldMap[vc.IntroducedIn!] = "_cachedContextVersion";
@@ -835,7 +1056,7 @@ namespace Krampus.BinJson.SourceGenerators
 
                 var fieldName = $"_cachedVersion{versionIndex++}";
                 versionFieldMap[versionString] = fieldName;
-                code.AppendLine($"private static readonly System.IComparable {fieldName} = {vc.VersionTypeName}.Parse(\"{versionString}\");");
+                code.AppendLine($"private static readonly System.IComparable {fieldName} = {versionTypeName}.Parse(\"{versionString}\");");
             }
 
             code.AppendLine();
@@ -852,9 +1073,15 @@ namespace Krampus.BinJson.SourceGenerators
                 .SelectMany(m =>
                 {
                     if (m.Version?.RenamedFrom is string renamedFrom)
-                        return new[] { m.JsonName ?? m.MemberName, renamedFrom };
+                    {
+                        var names = new List<string> { m.JsonName ?? m.MemberName, renamedFrom };
+                        names.AddRange(m.Aliases);
+                        return names;
+                    }
 
-                    return new[] { m.JsonName ?? m.MemberName };
+                    var defaultNames = new List<string> { m.JsonName ?? m.MemberName };
+                    defaultNames.AddRange(m.Aliases);
+                    return defaultNames;
                 })
                 .Distinct(StringComparer.Ordinal)
                 .ToList();
@@ -898,6 +1125,38 @@ namespace Krampus.BinJson.SourceGenerators
             code.OpenBrace();
         }
 
+        private static void EmitVersionGuardOpen(CodeBuilder code, VersionInfo versionInfo, IReadOnlyDictionary<string, string>? versionFieldMap)
+        {
+            string GetVersionReference(string versionString)
+            {
+                if (versionFieldMap != null && versionFieldMap.TryGetValue(versionString, out var fieldName))
+                {
+                    return fieldName;
+                }
+
+                return $"{versionInfo.VersionTypeName}.Parse(\"{versionString}\")";
+            }
+
+            if (versionInfo.IntroducedIn != null && versionInfo.RemovedIn != null)
+            {
+                var introRef = GetVersionReference(versionInfo.IntroducedIn);
+                var removedRef = GetVersionReference(versionInfo.RemovedIn);
+                code.AppendLine($"if (_version == null || (_version.CompareTo({introRef}) >= 0 && _version.CompareTo({removedRef}) < 0))");
+            }
+            else if (versionInfo.IntroducedIn != null)
+            {
+                var introRef = GetVersionReference(versionInfo.IntroducedIn);
+                code.AppendLine($"if (_version == null || _version.CompareTo({introRef}) >= 0)");
+            }
+            else if (versionInfo.RemovedIn != null)
+            {
+                var removedRef = GetVersionReference(versionInfo.RemovedIn);
+                code.AppendLine($"if (_version == null || _version.CompareTo({removedRef}) < 0)");
+            }
+
+            code.OpenBrace();
+        }
+
         private static void EmitVersionGuardClose(CodeBuilder code)
         {
             code.CloseBrace();
@@ -906,7 +1165,7 @@ namespace Krampus.BinJson.SourceGenerators
         private static void EmitCachedCustomConverterFields(CodeBuilder code, GeneratedTypeModel model)
         {
             var customMembers = model.AllMembers
-                .Where(m => !string.IsNullOrEmpty(m.CustomConverterType))
+                .Where(HasCustomMemberConverter)
                 .ToList();
 
             if (customMembers.Count == 0)
@@ -915,9 +1174,33 @@ namespace Krampus.BinJson.SourceGenerators
             code.Comment("Cached custom converters for member-level attributes");
             foreach (var member in customMembers)
             {
-                string converterType = member.CustomConverterType!;
                 string fieldName = GetCustomConverterFieldName(member);
-                code.AppendLine($"private static readonly {converterType} {fieldName} = new {converterType}();");
+                string factoryMethodName = GetCustomConverterFactoryMethodName(member);
+                code.AppendLine($"private static readonly IBJsonConverter {fieldName} = {factoryMethodName}();");
+                code.AppendLine($"private static IBJsonConverter {factoryMethodName}()");
+                code.OpenBrace();
+                if (!string.IsNullOrWhiteSpace(member.CustomConverterType))
+                {
+                    code.AppendLine($"if (Activator.CreateInstance(typeof({member.CustomConverterType})) is not IBJsonConverter converter)");
+                    code.OpenBrace();
+                    code.AppendLine($"throw new BJsonConverterException(\"Converter '{member.CustomConverterType}' could not be instantiated.\");");
+                    code.CloseBrace();
+                    code.AppendLine("return converter;");
+                }
+                else
+                {
+                    var memberTypeName = code.FormatTypeName(member.MemberType);
+                    code.AppendLine($"if (Activator.CreateInstance(typeof({member.CustomConverterFactoryType})) is not IBJsonConverterFactory factory)");
+                    code.OpenBrace();
+                    code.AppendLine($"throw new BJsonConverterException(\"Converter factory '{member.CustomConverterFactoryType}' could not be instantiated.\");");
+                    code.CloseBrace();
+                    code.AppendLine($"if (!factory.CanConvert(typeof({memberTypeName})))");
+                    code.OpenBrace();
+                    code.AppendLine($"throw new BJsonConverterException(\"Converter factory '{member.CustomConverterFactoryType}' cannot convert member '{member.MemberName}'.\");");
+                    code.CloseBrace();
+                    code.AppendLine($"return factory.CreateConverter(typeof({memberTypeName}));");
+                }
+                code.CloseBrace();
             }
 
             code.AppendLine();
@@ -928,6 +1211,59 @@ namespace Krampus.BinJson.SourceGenerators
             var sb = new StringBuilder("_memberConverter_");
             AppendIdentifierPart(sb, member.MemberName);
             return sb.ToString();
+        }
+
+        private static string GetCustomConverterFactoryMethodName(MemberModel member)
+        {
+            var sb = new StringBuilder("CreateMemberConverter_");
+            AppendIdentifierPart(sb, member.MemberName);
+            return sb.ToString();
+        }
+
+        private static bool HasCustomMemberConverter(MemberModel member)
+        {
+            return !string.IsNullOrWhiteSpace(member.CustomConverterType)
+                || !string.IsNullOrWhiteSpace(member.CustomConverterFactoryType);
+        }
+
+        private static void EmitRequiredPresenceMark(CodeBuilder code, MemberModel member, bool isRequired, string? requiredCondition)
+        {
+            if (!isRequired)
+                return;
+
+            if (requiredCondition == "true")
+                code.AppendLine($"_has_{member.MemberName} = true;");
+            else
+                code.AppendLine($"if ({requiredCondition}) _has_{member.MemberName} = true;");
+        }
+
+        private static string? BuildRequiredConditionExpression(MemberModel member, GeneratedTypeModel model)
+        {
+            if (member.IsRequired)
+                return "true";
+
+            if (member.RequiredWhenMethod == null)
+                return null;
+
+            var jsonName = EscapeString(member.JsonName ?? member.MemberName);
+            return member.RequiredWhenParameterCount switch
+            {
+                0 => $"{model.TypeName}.{member.RequiredWhenMethod}()",
+                1 => $"{model.TypeName}.{member.RequiredWhenMethod}(_version)",
+                _ => $"{model.TypeName}.{member.RequiredWhenMethod}(\"{jsonName}\", _version)"
+            };
+        }
+
+        private static string GetDefaultProviderInvocationExpression(MemberModel member, GeneratedTypeModel model)
+        {
+            var provider = member.DefaultValue?.ProviderMethod;
+            if (provider == null)
+                return "default";
+
+            if (member.DefaultValue?.ProviderAcceptsVersion == true)
+                return $"{model.TypeName}.{provider}(_version)";
+
+            return $"{model.TypeName}.{provider}()";
         }
 
         private static void AppendIdentifierPart(StringBuilder sb, string text)

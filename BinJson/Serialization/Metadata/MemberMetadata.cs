@@ -8,6 +8,7 @@ namespace Krampus.BinJson.Serialization.Metadata
     internal sealed class MemberMetadata
     {
         public MemberMetadata(
+            string memberName,
             string jsonName,
             Type memberType,
             Func<object, object?> getter,
@@ -23,14 +24,19 @@ namespace Krampus.BinJson.Serialization.Metadata
             bool hasDefaultConstant = false,
             object? defaultConstantValue = null,
             MethodInfo? defaultProviderMethod = null,
+            MethodInfo? requiredWhenMethod = null,
             Func<object?, string, IComparable?, bool>? ignoreWhenPredicateDelegate = null,
             Func<BJsonValue, string, IComparable?, bool, BJsonValue>? valueMapperFullDelegate = null,
             Func<BJsonValue, BJsonValue>? valueMapperShortDelegate = null,
-            Func<object?>? defaultProviderDelegate = null,
+            Func<IComparable?, object?>? defaultProviderDelegate = null,
+            Func<string, IComparable?, bool>? requiredWhenDelegate = null,
             IComparable? versionIntroducedIn = null,
             IComparable? versionRemovedIn = null,
-            string? legacyJsonName = null)
+            string? legacyJsonName = null,
+            string[]? aliases = null,
+            BJsonNumberHandling numberHandling = BJsonNumberHandling.Strict)
         {
+            MemberName = memberName;
             JsonName = jsonName;
             MemberType = memberType;
             Getter = getter;
@@ -46,14 +52,20 @@ namespace Krampus.BinJson.Serialization.Metadata
             HasDefaultConstant = hasDefaultConstant;
             DefaultConstantValue = defaultConstantValue;
             DefaultProviderMethod = defaultProviderMethod;
+            RequiredWhenMethod = requiredWhenMethod;
             IgnoreWhenPredicateDelegate = ignoreWhenPredicateDelegate;
             ValueMapperFullDelegate = valueMapperFullDelegate;
             ValueMapperShortDelegate = valueMapperShortDelegate;
             DefaultProviderDelegate = defaultProviderDelegate;
+            RequiredWhenDelegate = requiredWhenDelegate;
             VersionIntroducedIn = versionIntroducedIn;
             VersionRemovedIn = versionRemovedIn;
             LegacyJsonName = legacyJsonName;
+            Aliases = aliases ?? Array.Empty<string>();
+            NumberHandling = numberHandling;
         }
+
+        public string MemberName { get; }
 
         public string JsonName { get; }
 
@@ -88,13 +100,17 @@ namespace Krampus.BinJson.Serialization.Metadata
 
         public MethodInfo? DefaultProviderMethod { get; }
 
+        public MethodInfo? RequiredWhenMethod { get; }
+
         public Func<object?, string, IComparable?, bool>? IgnoreWhenPredicateDelegate { get; }
 
         public Func<BJsonValue, string, IComparable?, bool, BJsonValue>? ValueMapperFullDelegate { get; }
 
         public Func<BJsonValue, BJsonValue>? ValueMapperShortDelegate { get; }
 
-        public Func<object?>? DefaultProviderDelegate { get; }
+        public Func<IComparable?, object?>? DefaultProviderDelegate { get; }
+
+        public Func<string, IComparable?, bool>? RequiredWhenDelegate { get; }
 
         public IComparable? VersionIntroducedIn { get; }
 
@@ -102,6 +118,11 @@ namespace Krampus.BinJson.Serialization.Metadata
 
         /// <summary>Legacy JSON key from [BJsonVersion(RenamedFrom="...")] for backwards-compatible deserialization.</summary>
         public string? LegacyJsonName { get; }
+
+        /// <summary>Additional legacy JSON aliases from [BJsonAlias].</summary>
+        public string[] Aliases { get; }
+
+        public BJsonNumberHandling NumberHandling { get; }
 
         public bool HasVersionRange => VersionIntroducedIn != null || VersionRemovedIn != null;
 

@@ -1,6 +1,7 @@
 #nullable enable
 
 using System;
+using System.Runtime.CompilerServices;
 using Krampus.BinJson.Error;
 
 namespace Krampus.BinJson.Serialization
@@ -11,12 +12,12 @@ namespace Krampus.BinJson.Serialization
     /// </summary>
     public static class BJsonSerializer
     {
-        [ThreadStatic]
-        private static BJsonObjectSerializer? _threadDefaultSerializer;
+        private static readonly BJsonRuntime _defaultRuntime = new BJsonRuntime();
+        private static readonly ConditionalWeakTable<BJsonSerializerOptions, BJsonRuntime> _runtimeCache = new ConditionalWeakTable<BJsonSerializerOptions, BJsonRuntime>();
 
         public static BJsonValue Serialize<T>(T? value, BJsonSerializerOptions? options = null)
         {
-            return GetSerializer(options).SerializeValue(value, typeof(T));
+            return GetRuntime(options).Serialize(value, typeof(T));
         }
 
         public static BJsonValue Serialize(object? value, Type declaredType, BJsonSerializerOptions? options = null)
@@ -24,12 +25,12 @@ namespace Krampus.BinJson.Serialization
             if (declaredType is null)
                 throw new BJsonValidationException("Parameter 'declaredType' cannot be null.");
 
-            return GetSerializer(options).SerializeValue(value, declaredType);
+            return GetRuntime(options).Serialize(value, declaredType);
         }
 
         public static T? Deserialize<T>(BJsonValue value, BJsonSerializerOptions? options = null)
         {
-            return (T?)GetSerializer(options).DeserializeValue(value, typeof(T));
+            return GetRuntime(options).Deserialize<T>(value);
         }
 
         public static object? Deserialize(BJsonValue value, Type targetType, BJsonSerializerOptions? options = null)
@@ -37,15 +38,15 @@ namespace Krampus.BinJson.Serialization
             if (targetType is null)
                 throw new BJsonValidationException("Parameter 'targetType' cannot be null.");
 
-            return GetSerializer(options).DeserializeValue(value, targetType);
+            return GetRuntime(options).Deserialize(value, targetType);
         }
 
-        private static BJsonObjectSerializer GetSerializer(BJsonSerializerOptions? options)
+        private static BJsonRuntime GetRuntime(BJsonSerializerOptions? options)
         {
-            if (options is not null)
-                return new BJsonObjectSerializer(options);
+            if (options is null)
+                return _defaultRuntime;
 
-            return _threadDefaultSerializer ??= new BJsonObjectSerializer(options: null);
+            return _runtimeCache.GetValue(options, static key => new BJsonRuntime(key));
         }
     }
 }

@@ -14,11 +14,13 @@ namespace Krampus.BinJson.SourceGenerators
             string @namespace,
             string typeName,
             bool isValueType,
+            bool isAbstract,
             TypeConfiguration configuration)
         {
             Namespace = @namespace;
             TypeName = typeName;
             IsValueType = isValueType;
+            IsAbstract = isAbstract;
             Configuration = configuration;
         }
 
@@ -30,6 +32,9 @@ namespace Krampus.BinJson.SourceGenerators
 
         /// <summary>True if this is a struct (value type)</summary>
         public bool IsValueType { get; }
+
+        /// <summary>True if this is an abstract class/interface.</summary>
+        public bool IsAbstract { get; }
 
         /// <summary>Configuration from [BJsonSerializable] attribute</summary>
         public TypeConfiguration Configuration { get; }

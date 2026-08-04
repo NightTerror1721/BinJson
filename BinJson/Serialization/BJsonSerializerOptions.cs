@@ -25,6 +25,14 @@ namespace Krampus.BinJson.Serialization
 
         public ReferenceHandler? ReferenceHandler { get; set; }
 
+        public IBJsonPreprocessorContext? PreprocessorContext { get; set; }
+
+        /// <summary>
+        /// Controls how paths provided to <see cref="BJsonExternalRefAttribute"/> are validated.
+        /// Default keeps references inside the preprocessor base path (or current directory when not set).
+        /// </summary>
+        public ExternalReferencePathPolicy ExternalReferencePathPolicy { get; set; } = ExternalReferencePathPolicy.RestrictToBasePath;
+
         public bool IncludeFields { get; set; } = true;
 
         public bool IncludePrivateMembers { get; set; }
@@ -50,6 +58,14 @@ namespace Krampus.BinJson.Serialization
             _converters.Add(converter);
         }
 
+        public void AddConverterFactory(IBJsonConverterFactory factory)
+        {
+            if (factory is null)
+                throw new BJsonValidationException("Parameter 'factory' cannot be null.");
+
+            _converters.AddFactory(factory);
+        }
+
         internal bool TryGetConverter(Type type, out IBJsonConverter converter)
         {
             return _converters.TryGetConverter(type, out converter!);
@@ -70,5 +86,11 @@ namespace Krampus.BinJson.Serialization
         CamelCase,
         SnakeCase,
         KebabCase
+    }
+
+    public enum ExternalReferencePathPolicy
+    {
+        AllowAny,
+        RestrictToBasePath
     }
 }
