@@ -405,7 +405,10 @@ namespace Krampus.BinJson.Serialization
                         // Static predicate check
                         if (member.IgnoreWhenPredicate != null)
                         {
-                            var shouldIgnore = member.IgnoreWhenPredicate.Invoke(null, new object?[] { memberValue, member.JsonName, activeVersion });
+                            var shouldIgnore = member.IgnoreWhenPredicateDelegate != null
+                                ? member.IgnoreWhenPredicateDelegate(memberValue, member.JsonName, activeVersion)
+                                : member.IgnoreWhenPredicate.Invoke(null, new object?[] { memberValue, member.JsonName, activeVersion });
+
                             if (shouldIgnore is true)
                                 continue;
                         }
@@ -554,7 +557,8 @@ namespace Krampus.BinJson.Serialization
                 throw new BJsonDeserializationException($"Cannot deserialize value '{value.Type}' to '{targetType.FullName}'.");
 
             var metadata = GetTypeMetadata(targetType);
-            var instance = CreateObjectInstance(targetType, metadata, obj);
+            var caseInsensitiveIndex = CreateCaseInsensitiveIndex(obj);
+            var instance = CreateObjectInstance(targetType, metadata, obj, caseInsensitiveIndex);
             var consumedNames = new HashSet<string>(StringComparer.Ordinal);
 
             var activeVersion = _options.Version ?? metadata.VersionContext;
@@ -573,9 +577,9 @@ namespace Krampus.BinJson.Serialization
 
                 // Try primary key, then legacy key (RenamedFrom)
                 BJsonValue jsonMemberValue;
-                if (!TryGetObjectValue(obj, member.JsonName, out jsonMemberValue))
+                if (!TryGetObjectValue(obj, member.JsonName, out jsonMemberValue, caseInsensitiveIndex))
                 {
-                    if (member.LegacyJsonName != null && TryGetObjectValue(obj, member.LegacyJsonName, out jsonMemberValue))
+                    if (member.LegacyJsonName != null && TryGetObjectValue(obj, member.LegacyJsonName, out jsonMemberValue, caseInsensitiveIndex))
                     {
                         consumedNames.Add(member.LegacyJsonName);
                     }
@@ -598,7 +602,10 @@ namespace Krampus.BinJson.Serialization
                 if (member.IgnoreWhenPredicate != null)
                 {
                     var rawForPredicate = member.Getter(instance);
-                    var shouldIgnore = member.IgnoreWhenPredicate.Invoke(null, new object?[] { rawForPredicate, member.JsonName, activeVersion });
+                    var shouldIgnore = member.IgnoreWhenPredicateDelegate != null
+                        ? member.IgnoreWhenPredicateDelegate(rawForPredicate, member.JsonName, activeVersion)
+                        : member.IgnoreWhenPredicate.Invoke(null, new object?[] { rawForPredicate, member.JsonName, activeVersion });
+
                     if (shouldIgnore is true)
                         continue;
                 }
@@ -636,7 +643,7 @@ namespace Krampus.BinJson.Serialization
             return instance;
         }
 
-        private object CreateObjectInstance(Type targetType, TypeMetadata metadata, BJsonObject obj)
+        private object CreateObjectInstance(Type targetType, TypeMetadata metadata, BJsonObject obj, Dictionary<string, BJsonValue>? caseInsensitiveIndex)
         {
             // Factory method takes precedence over constructor
             if (metadata.FactoryMethod != null)
@@ -646,7 +653,7 @@ namespace Krampus.BinJson.Serialization
                 for (int i = 0; i < factoryParams.Length; i++)
                 {
                     var parameter = factoryParams[i];
-                    if (TryGetObjectValue(obj, parameter.Name ?? string.Empty, out var parameterValue))
+                    if (TryGetObjectValue(obj, parameter.Name ?? string.Empty, out var parameterValue, caseInsensitiveIndex))
                     {
                         factoryArgs[i] = DeserializeValue(parameterValue, parameter.ParameterType);
                     }
@@ -682,7 +689,7 @@ namespace Krampus.BinJson.Serialization
             for (int i = 0; i < constructorMetadata.Parameters.Length; i++)
             {
                 var parameter = constructorMetadata.Parameters[i];
-                if (TryGetObjectValue(obj, parameter.Name ?? string.Empty, out var parameterValue))
+                if (TryGetObjectValue(obj, parameter.Name ?? string.Empty, out var parameterValue, caseInsensitiveIndex))
                 {
                     args[i] = DeserializeValue(parameterValue, parameter.ParameterType);
                 }
@@ -707,13 +714,19 @@ namespace Krampus.BinJson.Serialization
         {
             if (member.ValueMapperFullSignature != null)
             {
-                var result = member.ValueMapperFullSignature.Invoke(null, new object?[] { value, member.JsonName, activeVersion, isReading });
+                var result = member.ValueMapperFullDelegate != null
+                    ? member.ValueMapperFullDelegate(value, member.JsonName, activeVersion, isReading)
+                    : member.ValueMapperFullSignature.Invoke(null, new object?[] { value, member.JsonName, activeVersion, isReading });
+
                 return result is BJsonValue bv ? bv : value;
             }
 
             if (member.ValueMapperShortSignature != null)
             {
-                var result = member.ValueMapperShortSignature.Invoke(null, new object?[] { value });
+                var result = member.ValueMapperShortDelegate != null
+                    ? member.ValueMapperShortDelegate(value)
+                    : member.ValueMapperShortSignature.Invoke(null, new object?[] { value });
+
                 return result is BJsonValue bv2 ? bv2 : value;
             }
 
@@ -724,7 +737,10 @@ namespace Krampus.BinJson.Serialization
         {
             if (member.DefaultProviderMethod != null)
             {
-                var defaultVal = member.DefaultProviderMethod.Invoke(null, null);
+                var defaultVal = member.DefaultProviderDelegate != null
+                    ? member.DefaultProviderDelegate()
+                    : member.DefaultProviderMethod.Invoke(null, null);
+
                 member.Setter(instance, defaultVal);
                 return;
             }
@@ -745,24 +761,30 @@ namespace Krampus.BinJson.Serialization
             }
         }
 
-        private bool TryGetObjectValue(BJsonObject obj, string propertyName, out BJsonValue value)
+        private Dictionary<string, BJsonValue>? CreateCaseInsensitiveIndex(BJsonObject obj)
+        {
+            if (!_options.PropertyNameCaseInsensitive)
+                return null;
+
+            var index = new Dictionary<string, BJsonValue>(obj.Count, StringComparer.OrdinalIgnoreCase);
+            foreach (var pair in obj)
+            {
+                if (!index.ContainsKey(pair.Key))
+                    index[pair.Key] = pair.Value;
+            }
+
+            return index;
+        }
+
+        private bool TryGetObjectValue(BJsonObject obj, string propertyName, out BJsonValue value, Dictionary<string, BJsonValue>? caseInsensitiveIndex = null)
         {
             if (obj.TryGetValue(propertyName, out value))
                 return true;
 
-            if (!_options.PropertyNameCaseInsensitive)
+            if (caseInsensitiveIndex is null)
                 return false;
 
-            foreach (var pair in obj)
-            {
-                if (string.Equals(pair.Key, propertyName, StringComparison.OrdinalIgnoreCase))
-                {
-                    value = pair.Value;
-                    return true;
-                }
-            }
-
-            return false;
+            return caseInsensitiveIndex.TryGetValue(propertyName, out value);
         }
 
         private MemberMetadata[] GetSerializableMembers(Type type)

@@ -7,7 +7,7 @@ This folder contains small example projects that demonstrate common BinJson scen
 - `GameStateSerialization/` - serializing gameplay state objects into `BJsonValue`, binary, and JSON text.
 - `ApiDtos/` - attribute-driven DTO contracts and custom converters.
 - `ConfigurationFiles/` - preserving unknown settings with extension data.
-- `PerformanceComparison/` - a simple reflection vs source-generator comparison.
+- `PerformanceComparison/` - benchmark matrix for DOM, text, binary, async paths, and CLR reflection vs source-generated serializers.
 - `UnityIntegrationSample/` - Unity-oriented sample scripts and usage notes.
 
 ## Building the examples

@@ -131,7 +131,7 @@ public sealed class PlayerProfile
 	[BJsonRequired]
 	public string Name { get; set; } = string.Empty;
 
-	[BJsonIgnore(Condition = BJsonIgnoreCondition.WhenNull)]
+	[BJsonIgnore(Condition = BJsonIgnoreCondition.WhenWritingNull)]
 	public string? Alias { get; set; }
 }
 ```

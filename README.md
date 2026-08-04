@@ -404,12 +404,16 @@ The generator reports issues at compile time:
 
 | ID | Description |
 |----|-------------|
-| BJSON001 | Invalid ExtensionData member type |
+| BJSON001 | Invalid ExtensionData member type (`IDictionary<string, BJsonValue>` required) |
 | BJSON002 | Multiple constructors with `[BJsonConstructor]` |
 | BJSON003 | Multiple members with `[BJsonExtensionData]` |
 | BJSON004 | Custom converter type not found |
 | BJSON005 | Conflicting JSON property names |
-| BJSON006 | Constructor parameter cannot be matched to member |
+| BJSON006 | Constructor/factory parameter cannot be matched to member |
+| BJSON007 | Referenced attribute method not found |
+| BJSON008 | Referenced attribute method is not accessible from generated code |
+| BJSON009 | Referenced attribute method has invalid signature |
+| BJSON010 | Unsupported type shape for source generation (for example generic or nested) |
 
 ## Performance
 

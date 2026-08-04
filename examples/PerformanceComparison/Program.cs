@@ -7,6 +7,7 @@ using System.Text;
 using System.Threading.Tasks;
 using Krampus.BinJson;
 using Krampus.BinJson.Binary;
+using Krampus.BinJson.Serialization;
 using Krampus.BinJson.Text;
 
 const int warmupIterations = 24;
@@ -18,6 +19,10 @@ var repeatedStringsObject = CreateRepeatedStringsObject();
 var packedNumbers = CreatePackedNumberArray(8192);
 var binaryBlob = CreateBinaryBlob(64 * 1024);
 var wideRootObject = CreateWideRootObject(128, 8);
+var reflectionProfile = CreateReflectionProfile();
+var generatedProfile = CreateGeneratedProfile();
+var attributedReflectionProfile = CreateAttributedReflectionProfile();
+var attributedGeneratedProfile = CreateAttributedGeneratedProfile();
 
 var repeatedWithTableOptions = new BJsonBinaryWriterOptions { EnableStringTable = true, EnablePackedArrays = true };
 var repeatedWithoutTableOptions = new BJsonBinaryWriterOptions { EnableStringTable = false, EnablePackedArrays = true };
@@ -275,6 +280,59 @@ RunBinaryAsyncReadScenario(
         return value.ObjectValue.Count;
     }).GetAwaiter().GetResult();
 
+RunClrSerializeScenario(
+    "CLR reflection serialize",
+    reflectionProfile,
+    typeof(ReflectionProfile),
+    mediumIterations);
+
+RunClrSerializeScenario(
+    "CLR generated serialize",
+    generatedProfile,
+    typeof(GeneratedProfile),
+    mediumIterations);
+
+var reflectionSerialized = BJson.Serialize(reflectionProfile, typeof(ReflectionProfile));
+var generatedSerialized = BJson.Serialize(generatedProfile, typeof(GeneratedProfile));
+
+RunClrDeserializeScenario(
+    "CLR reflection deserialize",
+    reflectionSerialized,
+    typeof(ReflectionProfile),
+    mediumIterations);
+
+RunClrDeserializeScenario(
+    "CLR generated deserialize",
+    generatedSerialized,
+    typeof(GeneratedProfile),
+    mediumIterations);
+
+RunClrSerializeScenario(
+    "CLR attributed reflection serialize",
+    attributedReflectionProfile,
+    typeof(AttributedReflectionProfile),
+    mediumIterations);
+
+RunClrSerializeScenario(
+    "CLR attributed generated serialize",
+    attributedGeneratedProfile,
+    typeof(AttributedGeneratedProfile),
+    mediumIterations);
+
+var attributedPayloadMissingDefaults = CreateAttributedPayloadWithoutDefaults();
+
+RunClrDeserializeScenario(
+    "CLR attributed reflection deserialize missing defaults",
+    attributedPayloadMissingDefaults,
+    typeof(AttributedReflectionProfile),
+    mediumIterations);
+
+RunClrDeserializeScenario(
+    "CLR attributed generated deserialize missing defaults",
+    attributedPayloadMissingDefaults,
+    typeof(AttributedGeneratedProfile),
+    mediumIterations);
+
 PrintComparisonSummary(BenchmarkStore.Results);
 
 static void RunSerializeScenario(
@@ -434,6 +492,40 @@ static async Task RunBinaryAsyncReadScenario(string name, byte[] payload, int it
     TimeSpan elapsed = await MeasureElapsedAsync(iterations, () => action(payload)).ConfigureAwait(false);
 
     PrintResult(name, iterations, payload.Length, elapsed, allocatedBytes);
+}
+
+static void RunClrSerializeScenario(string name, object value, Type declaredType, int iterations)
+{
+    Warmup(warmupIterations, () => BJson.Serialize(value, declaredType));
+
+    int payloadSize = BJsonBinaryWriter.Serialize(BJson.Serialize(value, declaredType)).Length;
+    long allocatedBytes = MeasureAllocatedBytes(iterations, () =>
+    {
+        _ = BJson.Serialize(value, declaredType);
+    });
+    TimeSpan elapsed = MeasureElapsed(iterations, () =>
+    {
+        _ = BJson.Serialize(value, declaredType);
+    });
+
+    PrintResult(name, iterations, payloadSize, elapsed, allocatedBytes);
+}
+
+static void RunClrDeserializeScenario(string name, BJsonValue payload, Type targetType, int iterations)
+{
+    Warmup(warmupIterations, () => BJson.Deserialize(payload, targetType));
+
+    int payloadSize = BJsonBinaryWriter.Serialize(payload).Length;
+    long allocatedBytes = MeasureAllocatedBytes(iterations, () =>
+    {
+        _ = BJson.Deserialize(payload, targetType);
+    });
+    TimeSpan elapsed = MeasureElapsed(iterations, () =>
+    {
+        _ = BJson.Deserialize(payload, targetType);
+    });
+
+    PrintResult(name, iterations, payloadSize, elapsed, allocatedBytes);
 }
 
 static void RunDeserializeScenario(
@@ -618,6 +710,13 @@ static void PrintComparisonSummary(Dictionary<string, (string Name, int Iteratio
     PrintComparison(results, "Async parse/read DOM: Text vs Binary", "Text async parse from stream", "Async read from ReadOnlyMemory to DOM");
     PrintComparison(results, "Async parse/read stream parity: Text vs Binary", "Text async parse from stream", "Async read from stream to DOM");
     Console.WriteLine();
+
+    Console.WriteLine("CLR serializer comparisons");
+    PrintComparison(results, "CLR serialize: generated vs reflection", "CLR reflection serialize", "CLR generated serialize");
+    PrintComparison(results, "CLR deserialize: generated vs reflection", "CLR reflection deserialize", "CLR generated deserialize");
+    PrintComparison(results, "CLR attributed serialize: generated vs reflection", "CLR attributed reflection serialize", "CLR attributed generated serialize");
+    PrintComparison(results, "CLR attributed deserialize missing defaults: generated vs reflection", "CLR attributed reflection deserialize missing defaults", "CLR attributed generated deserialize missing defaults");
+    Console.WriteLine();
 }
 
 static void PrintComparison(Dictionary<string, (string Name, int Iterations, int PayloadSize, TimeSpan Elapsed, long AllocatedBytes, double ThroughputOpsPerSecond, double BytesPerOp)> results, string label, string baselineName, string contenderName)
@@ -787,8 +886,172 @@ static BJsonValue CreateWideRootObject(int propertyCount, int arrayLength)
     return BJsonValue.Create(obj);
 }
 
+static ReflectionProfile CreateReflectionProfile()
+{
+    var values = new List<int>(32);
+    for (int i = 0; i < 32; i++)
+        values.Add(i * 3);
+
+    return new ReflectionProfile
+    {
+        Id = 42,
+        Name = "reflection_profile",
+        Score = 91.75,
+        Active = true,
+        CreatedAtUnix = 1735603200,
+        Values = values
+    };
+}
+
+static GeneratedProfile CreateGeneratedProfile()
+{
+    var values = new List<int>(32);
+    for (int i = 0; i < 32; i++)
+        values.Add(i * 3);
+
+    return new GeneratedProfile
+    {
+        Id = 42,
+        Name = "generated_profile",
+        Score = 91.75,
+        Active = true,
+        CreatedAtUnix = 1735603200,
+        Values = values
+    };
+}
+
+static AttributedReflectionProfile CreateAttributedReflectionProfile()
+{
+    return new AttributedReflectionProfile
+    {
+        Id = 7,
+        Tag = "alpha",
+        AuditTrail = "evt",
+        Mode = "custom"
+    };
+}
+
+static AttributedGeneratedProfile CreateAttributedGeneratedProfile()
+{
+    return new AttributedGeneratedProfile
+    {
+        Id = 7,
+        Tag = "alpha",
+        AuditTrail = "evt",
+        Mode = "custom"
+    };
+}
+
+static BJsonValue CreateAttributedPayloadWithoutDefaults()
+{
+    var obj = new BJsonObject
+    {
+        ["Id"] = BJsonValue.Create(7),
+        ["Tag"] = BJsonValue.Create("beta"),
+        ["AuditTrail"] = BJsonValue.Create("evt")
+    };
+
+    return BJsonValue.Create(obj);
+}
+
 static class BenchmarkStore
 {
     public static readonly Dictionary<string, (string Name, int Iterations, int PayloadSize, TimeSpan Elapsed, long AllocatedBytes, double ThroughputOpsPerSecond, double BytesPerOp)> Results =
         new Dictionary<string, (string Name, int Iterations, int PayloadSize, TimeSpan Elapsed, long AllocatedBytes, double ThroughputOpsPerSecond, double BytesPerOp)>(StringComparer.Ordinal);
+}
+
+sealed class ReflectionProfile
+{
+    public int Id { get; set; }
+
+    public string Name { get; set; } = string.Empty;
+
+    public double Score { get; set; }
+
+    public bool Active { get; set; }
+
+    public long CreatedAtUnix { get; set; }
+
+    public List<int> Values { get; set; } = new List<int>();
+}
+
+[BJsonSerializable]
+sealed class GeneratedProfile
+{
+    public int Id { get; set; }
+
+    public string Name { get; set; } = string.Empty;
+
+    public double Score { get; set; }
+
+    public bool Active { get; set; }
+
+    public long CreatedAtUnix { get; set; }
+
+    public List<int> Values { get; set; } = new List<int>();
+}
+
+sealed class AttributedReflectionProfile
+{
+    public int Id { get; set; }
+
+    [BJsonValueMapper(nameof(MapTag))]
+    public string Tag { get; set; } = string.Empty;
+
+    [BJsonIgnoreWhen(nameof(NeverIgnore))]
+    public string AuditTrail { get; set; } = string.Empty;
+
+    [BJsonDefaultProvider(nameof(CreateDefaultMode))]
+    public string Mode { get; set; } = string.Empty;
+
+    internal static bool NeverIgnore(object? value, string propertyName, IComparable? version)
+    {
+        return false;
+    }
+
+    internal static BJsonValue MapTag(BJsonValue value, string propertyName, IComparable? version, bool isReading)
+    {
+        if (!value.TryGetString(out var text))
+            return value;
+
+        return BJsonValue.Create(isReading ? text.ToLowerInvariant() : text.ToUpperInvariant());
+    }
+
+    internal static string CreateDefaultMode()
+    {
+        return "standard";
+    }
+}
+
+[BJsonSerializable]
+sealed class AttributedGeneratedProfile
+{
+    public int Id { get; set; }
+
+    [BJsonValueMapper(nameof(MapTag))]
+    public string Tag { get; set; } = string.Empty;
+
+    [BJsonIgnoreWhen(nameof(NeverIgnore))]
+    public string AuditTrail { get; set; } = string.Empty;
+
+    [BJsonDefaultProvider(nameof(CreateDefaultMode))]
+    public string Mode { get; set; } = string.Empty;
+
+    internal static bool NeverIgnore(object? value, string propertyName, IComparable? version)
+    {
+        return false;
+    }
+
+    internal static BJsonValue MapTag(BJsonValue value, string propertyName, IComparable? version, bool isReading)
+    {
+        if (!value.TryGetString(out var text))
+            return value;
+
+        return BJsonValue.Create(isReading ? text.ToLowerInvariant() : text.ToUpperInvariant());
+    }
+
+    internal static string CreateDefaultMode()
+    {
+        return "standard";
+    }
 }

@@ -4,6 +4,23 @@ $project = '.\examples\PerformanceComparison\PerformanceComparison.csproj'
 $runs = 5
 $rows = @()
 
+$dotnetCommand = Get-Command dotnet -ErrorAction SilentlyContinue
+$dotnetExe = $null
+if ($dotnetCommand)
+{
+    $dotnetExe = $dotnetCommand.Source
+}
+if (-not $dotnetExe)
+{
+    $fallbackDotnet = 'C:\Program Files\dotnet\dotnet.exe'
+    if (-not (Test-Path $fallbackDotnet))
+    {
+        throw "dotnet executable not found in PATH or at '$fallbackDotnet'."
+    }
+
+    $dotnetExe = $fallbackDotnet
+}
+
 function Get-Median([double[]]$values)
 {
     if ($values.Count -eq 0) { return 0.0 }
@@ -21,7 +38,7 @@ function Get-Median([double[]]$values)
 for ($r = 1; $r -le $runs; $r++)
 {
     Write-Host "Running pass $r/$runs"
-    $output = dotnet run --project $project -c Release
+    $output = & $dotnetExe run --project $project -c Release
     foreach ($line in $output)
     {
         if ($line -notlike 'RESULT|*')
@@ -135,6 +152,11 @@ $comparisons += Add-Comparison 'Text vs Binary' 'Wide selective 1: Text vs Binar
 $comparisons += Add-Comparison 'Text vs Binary' 'Wide selective 8: Text vs Binary' 'Text wide root selective 8 properties (one pass)' 'Wide root object selective 8 properties (one pass)'
 $comparisons += Add-Comparison 'Text vs Binary' 'Async write stream parity: Text vs Binary' 'Text async write to MemoryStream UTF8' 'Async stream write serialize to MemoryStream'
 $comparisons += Add-Comparison 'Text vs Binary' 'Async parse/read stream parity: Text vs Binary' 'Text async parse from stream' 'Async read from stream to DOM'
+
+$comparisons += Add-Comparison 'CLR' 'CLR serialize: generated vs reflection' 'CLR reflection serialize' 'CLR generated serialize'
+$comparisons += Add-Comparison 'CLR' 'CLR deserialize: generated vs reflection' 'CLR reflection deserialize' 'CLR generated deserialize'
+$comparisons += Add-Comparison 'CLR' 'CLR attributed serialize: generated vs reflection' 'CLR attributed reflection serialize' 'CLR attributed generated serialize'
+$comparisons += Add-Comparison 'CLR' 'CLR attributed deserialize missing defaults: generated vs reflection' 'CLR attributed reflection deserialize missing defaults' 'CLR attributed generated deserialize missing defaults'
 
 $comparisons = $comparisons | Where-Object { $_ -ne $null }
 

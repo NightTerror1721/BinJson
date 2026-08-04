@@ -285,7 +285,7 @@ static BJsonValue MethodName(BJsonValue value, string propertyName, IComparable?
 
 **Fallback signature (no direction flag):**
 ```csharp
-static BJsonValue MethodName(BJsonValue value, string propertyName, IComparable? version)
+static BJsonValue MethodName(BJsonValue value)
 ```
 
 - `value` — the BJsonValue being read or written.
@@ -293,6 +293,8 @@ static BJsonValue MethodName(BJsonValue value, string propertyName, IComparable?
 - `version` — the active document version, or `null` if none.
 - `isReading` — `true` during deserialization, `false` during serialization.
 - Returns the transformed `BJsonValue`.
+
+> Runtime reflection supports both signatures above. Source-generated serializers require the full signature with four parameters.
 
 **Visibility requirement:** The method must be `internal` or `public` (not `private`) because the source generator emits a separate serializer class in the same assembly.
 
@@ -672,19 +674,16 @@ The source generator emits the following diagnostics at compile time:
 
 | ID | Severity | Description |
 |---|---|---|
-| `BJSON001` | Error | `[BJsonExtensionData]` member type is not `IDictionary<string, BJsonValue>` |
+| `BJSON001` | Warning | `[BJsonExtensionData]` member type is not `IDictionary<string, BJsonValue>` |
 | `BJSON002` | Error | Multiple constructors carry `[BJsonConstructor]` |
 | `BJSON003` | Error | Multiple members carry `[BJsonExtensionData]` |
-| `BJSON004` | Error | Custom converter type referenced by `[BJsonConverter]` was not found |
-| `BJSON005` | Error | Two or more members would produce the same JSON key |
-| `BJSON006` | Error | A `[BJsonConstructor]` parameter could not be matched to any member |
-| `BJSON007` | Error | `[BJsonIgnoreWhen]` references a method that does not exist or has an incompatible signature |
-| `BJSON008` | Error | `[BJsonValueMapper]` references a method that does not exist or has an incompatible signature |
-| `BJSON009` | Error | `[BJsonDefaultProvider]` references a method that does not exist or has an incompatible signature |
-| `BJSON010` | Error | Multiple methods carry `[BJsonFactoryMethod]` on the same type |
-| `BJSON011` | Error | `[BJsonFactoryMethod]` method is not static or does not return the declaring type |
-| `BJSON012` | Warning | Both `[BJsonDefaultValue]` and `[BJsonDefaultProvider]` are present on the same member; provider takes priority |
-| `BJSON013` | Warning | `[BJsonVersion].VersionType` does not implement `IComparable` or lacks a static `Parse(string)` method |
+| `BJSON004` | Warning | Custom converter type referenced by `[BJsonConverter]` was not found |
+| `BJSON005` | Warning | Two or more members would produce the same JSON key |
+| `BJSON006` | Warning | A constructor/factory parameter could not be matched to any member |
+| `BJSON007` | Warning | Method referenced by `[BJsonIgnoreWhen]`, `[BJsonValueMapper]`, or `[BJsonDefaultProvider]` was not found |
+| `BJSON008` | Warning | Referenced attribute method is not accessible from generated code (`public`, `internal`, or `protected internal` required) |
+| `BJSON009` | Warning | Referenced attribute method has an invalid signature |
+| `BJSON010` | Warning | Unsupported type shape for source generation (for example generic or nested type) |
 
 ---
 
@@ -731,7 +730,7 @@ public sealed class CharacterSave
 	[BJsonIgnoreWhen(nameof(ShouldIgnoreGuild))]
 	public string? Guild { get; set; }
 
-	private static bool ShouldIgnoreGuild(object? value, string propertyName, IComparable? version)
+	internal static bool ShouldIgnoreGuild(object? value, string propertyName, IComparable? version)
 		=> version != null
 		   && version.CompareTo(new Version("3.0.0")) >= 0
 		   && string.IsNullOrEmpty(value as string);
@@ -743,10 +742,10 @@ public sealed class CharacterSave
 	[BJsonVersion(typeof(Version), introducedIn: "1.0.0")]
 	public int Health { get; set; }
 
-	private static object? MapHealth(object? value, string propertyName, IComparable? version, bool isReading)
+	internal static BJsonValue MapHealth(BJsonValue value, string propertyName, IComparable? version, bool isReading)
 	{
 		if (isReading && version != null && version.CompareTo(new Version("2.0.0")) < 0)
-			return (int)value! * 10; // percentage → raw HP
+			return BJsonValue.Create(value.IntValue * 10); // percentage → raw HP
 		return value;
 	}
 
@@ -756,7 +755,7 @@ public sealed class CharacterSave
 	[BJsonDefaultProvider(nameof(GetDefaultLoadout))]
 	public Loadout Loadout { get; set; } = new Loadout();
 
-	private static Loadout GetDefaultLoadout() => new Loadout { Weapon = "Sword", Armor = "Leather" };
+	internal static Loadout GetDefaultLoadout() => new Loadout { Weapon = "Sword", Armor = "Leather" };
 
 	// ── Extension data (forward compatibility) ────────────────────
 

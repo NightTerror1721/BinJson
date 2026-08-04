@@ -23,6 +23,10 @@ namespace Krampus.BinJson.Serialization.Metadata
             bool hasDefaultConstant = false,
             object? defaultConstantValue = null,
             MethodInfo? defaultProviderMethod = null,
+            Func<object?, string, IComparable?, bool>? ignoreWhenPredicateDelegate = null,
+            Func<BJsonValue, string, IComparable?, bool, BJsonValue>? valueMapperFullDelegate = null,
+            Func<BJsonValue, BJsonValue>? valueMapperShortDelegate = null,
+            Func<object?>? defaultProviderDelegate = null,
             IComparable? versionIntroducedIn = null,
             IComparable? versionRemovedIn = null,
             string? legacyJsonName = null)
@@ -42,6 +46,10 @@ namespace Krampus.BinJson.Serialization.Metadata
             HasDefaultConstant = hasDefaultConstant;
             DefaultConstantValue = defaultConstantValue;
             DefaultProviderMethod = defaultProviderMethod;
+            IgnoreWhenPredicateDelegate = ignoreWhenPredicateDelegate;
+            ValueMapperFullDelegate = valueMapperFullDelegate;
+            ValueMapperShortDelegate = valueMapperShortDelegate;
+            DefaultProviderDelegate = defaultProviderDelegate;
             VersionIntroducedIn = versionIntroducedIn;
             VersionRemovedIn = versionRemovedIn;
             LegacyJsonName = legacyJsonName;
@@ -79,6 +87,14 @@ namespace Krampus.BinJson.Serialization.Metadata
         public object? DefaultConstantValue { get; }
 
         public MethodInfo? DefaultProviderMethod { get; }
+
+        public Func<object?, string, IComparable?, bool>? IgnoreWhenPredicateDelegate { get; }
+
+        public Func<BJsonValue, string, IComparable?, bool, BJsonValue>? ValueMapperFullDelegate { get; }
+
+        public Func<BJsonValue, BJsonValue>? ValueMapperShortDelegate { get; }
+
+        public Func<object?>? DefaultProviderDelegate { get; }
 
         public IComparable? VersionIntroducedIn { get; }
 

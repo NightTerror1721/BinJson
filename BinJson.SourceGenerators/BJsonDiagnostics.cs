@@ -64,5 +64,41 @@ namespace Krampus.BinJson.SourceGenerators
             category: Category,
             defaultSeverity: DiagnosticSeverity.Warning,
             isEnabledByDefault: true);
+
+        // BJSON007: Referenced method not found
+        public static readonly DiagnosticDescriptor ReferencedMethodNotFound = new DiagnosticDescriptor(
+            id: "BJSON007",
+            title: "Referenced attribute method not found",
+            messageFormat: "Method '{0}' referenced by attribute '{1}' was not found on type '{2}'",
+            category: Category,
+            defaultSeverity: DiagnosticSeverity.Warning,
+            isEnabledByDefault: true);
+
+        // BJSON008: Referenced method is not accessible to generated serializer
+        public static readonly DiagnosticDescriptor ReferencedMethodInaccessible = new DiagnosticDescriptor(
+            id: "BJSON008",
+            title: "Referenced attribute method is not accessible",
+            messageFormat: "Method '{0}' referenced by attribute '{1}' on type '{2}' is not accessible from generated code. Use public/internal/protected internal.",
+            category: Category,
+            defaultSeverity: DiagnosticSeverity.Warning,
+            isEnabledByDefault: true);
+
+        // BJSON009: Referenced method has invalid signature
+        public static readonly DiagnosticDescriptor ReferencedMethodInvalidSignature = new DiagnosticDescriptor(
+            id: "BJSON009",
+            title: "Referenced attribute method has invalid signature",
+            messageFormat: "Method '{0}' referenced by attribute '{1}' on type '{2}' has an invalid signature. Expected: {3}.",
+            category: Category,
+            defaultSeverity: DiagnosticSeverity.Warning,
+            isEnabledByDefault: true);
+
+        // BJSON010: Unsupported type shape
+        public static readonly DiagnosticDescriptor UnsupportedTypeShape = new DiagnosticDescriptor(
+            id: "BJSON010",
+            title: "Unsupported type shape for source generation",
+            messageFormat: "Type '{0}' is not supported by BJson source generation yet: {1}",
+            category: Category,
+            defaultSeverity: DiagnosticSeverity.Warning,
+            isEnabledByDefault: true);
     }
 }

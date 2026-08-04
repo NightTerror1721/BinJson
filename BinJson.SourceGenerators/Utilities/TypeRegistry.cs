@@ -60,7 +60,24 @@ namespace Krampus.BinJson.SourceGenerators.Utilities
         /// </summary>
         public static bool IsPrimitive(ITypeSymbol type)
         {
-            return PrimitiveTypes.Contains(type.ToDisplayString());
+            return type.SpecialType switch
+            {
+                SpecialType.System_Boolean or
+                SpecialType.System_Byte or
+                SpecialType.System_SByte or
+                SpecialType.System_Int16 or
+                SpecialType.System_UInt16 or
+                SpecialType.System_Int32 or
+                SpecialType.System_UInt32 or
+                SpecialType.System_Int64 or
+                SpecialType.System_UInt64 or
+                SpecialType.System_Single or
+                SpecialType.System_Double or
+                SpecialType.System_Decimal or
+                SpecialType.System_String or
+                SpecialType.System_Char => true,
+                _ => PrimitiveTypes.Contains(type.ToDisplayString())
+            };
         }
 
         /// <summary>
@@ -68,8 +85,16 @@ namespace Krampus.BinJson.SourceGenerators.Utilities
         /// </summary>
         public static bool IsBinJsonType(ITypeSymbol type)
         {
-            var displayString = type.ToDisplayString();
-            return BinJsonTypes.Contains(displayString);
+            if (type is INamedTypeSymbol namedType)
+            {
+                string? ns = namedType.ContainingNamespace?.ToDisplayString();
+                if (string.Equals(ns, "Krampus.BinJson", StringComparison.Ordinal))
+                {
+                    return namedType.Name is "BJsonValue" or "BJsonObject" or "BJsonArray" or "BJsonNull" or "BJsonBinary";
+                }
+            }
+
+            return BinJsonTypes.Contains(type.ToDisplayString());
         }
 
         /// <summary>
@@ -184,7 +209,7 @@ namespace Krampus.BinJson.SourceGenerators.Utilities
         /// </summary>
         public static bool IsStringDictionary(ITypeSymbol keyType)
         {
-            return keyType.ToDisplayString() == "System.String" || keyType.ToDisplayString() == "string";
+            return keyType.SpecialType == SpecialType.System_String;
         }
 
         /// <summary>

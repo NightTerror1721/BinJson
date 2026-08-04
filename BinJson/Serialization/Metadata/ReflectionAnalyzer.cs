@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using System.Text;
 using Krampus.BinJson.Error;
 
 namespace Krampus.BinJson.Serialization.Metadata
@@ -133,13 +134,19 @@ namespace Krampus.BinJson.Serialization.Metadata
         {
             // IgnoreWhen predicate
             MethodInfo? ignoreWhenPredicate = null;
+            Func<object?, string, IComparable?, bool>? ignoreWhenPredicateDelegate = null;
             var ignoreWhenAttr = memberInfo.GetCustomAttribute<BJsonIgnoreWhenAttribute>();
             if (ignoreWhenAttr != null)
+            {
                 ignoreWhenPredicate = FindStaticMethod(declaringType, ignoreWhenAttr.MethodName);
+                ignoreWhenPredicateDelegate = CreateIgnoreWhenDelegate(ignoreWhenPredicate);
+            }
 
             // ValueMapper
             MethodInfo? mapperFull = null;
             MethodInfo? mapperShort = null;
+            Func<BJsonValue, string, IComparable?, bool, BJsonValue>? mapperFullDelegate = null;
+            Func<BJsonValue, BJsonValue>? mapperShortDelegate = null;
             var mapperAttr = memberInfo.GetCustomAttribute<BJsonValueMapperAttribute>();
             if (mapperAttr != null)
             {
@@ -148,13 +155,18 @@ namespace Krampus.BinJson.Serialization.Metadata
                     null,
                     new[] { typeof(BJsonValue), typeof(string), typeof(IComparable), typeof(bool) },
                     null);
-                if (mapperFull == null)
+                if (mapperFull != null)
+                {
+                    mapperFullDelegate = CreateValueMapperFullDelegate(mapperFull);
+                }
+                else
                 {
                     mapperShort = declaringType.GetMethod(mapperAttr.MethodName,
                         BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic,
                         null,
                         new[] { typeof(BJsonValue) },
                         null);
+                    mapperShortDelegate = CreateValueMapperShortDelegate(mapperShort);
                 }
             }
 
@@ -170,9 +182,13 @@ namespace Krampus.BinJson.Serialization.Metadata
 
             // DefaultProvider method
             MethodInfo? defaultProviderMethod = null;
+            Func<object?>? defaultProviderDelegate = null;
             var defaultProviderAttr = memberInfo.GetCustomAttribute<BJsonDefaultProviderAttribute>();
             if (defaultProviderAttr != null)
+            {
                 defaultProviderMethod = FindStaticMethod(declaringType, defaultProviderAttr.MethodName);
+                defaultProviderDelegate = CreateDefaultProviderDelegate(defaultProviderMethod);
+            }
 
             // Version range
             IComparable? versionIntroducedIn = null;
@@ -193,6 +209,10 @@ namespace Krampus.BinJson.Serialization.Metadata
                 mapperFull, mapperShort,
                 hasDefaultConstant, defaultConstantValue,
                 defaultProviderMethod,
+                ignoreWhenPredicateDelegate,
+                mapperFullDelegate,
+                mapperShortDelegate,
+                defaultProviderDelegate,
                 versionIntroducedIn, versionRemovedIn,
                 legacyJsonName);
         }
@@ -235,6 +255,66 @@ namespace Krampus.BinJson.Serialization.Metadata
                 BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
         }
 
+        private static Func<object?, string, IComparable?, bool>? CreateIgnoreWhenDelegate(MethodInfo? method)
+        {
+            if (method == null)
+                return null;
+
+            try
+            {
+                return (Func<object?, string, IComparable?, bool>)method.CreateDelegate(typeof(Func<object?, string, IComparable?, bool>));
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static Func<BJsonValue, string, IComparable?, bool, BJsonValue>? CreateValueMapperFullDelegate(MethodInfo? method)
+        {
+            if (method == null)
+                return null;
+
+            try
+            {
+                return (Func<BJsonValue, string, IComparable?, bool, BJsonValue>)method.CreateDelegate(typeof(Func<BJsonValue, string, IComparable?, bool, BJsonValue>));
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static Func<BJsonValue, BJsonValue>? CreateValueMapperShortDelegate(MethodInfo? method)
+        {
+            if (method == null)
+                return null;
+
+            try
+            {
+                return (Func<BJsonValue, BJsonValue>)method.CreateDelegate(typeof(Func<BJsonValue, BJsonValue>));
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static Func<object?>? CreateDefaultProviderDelegate(MethodInfo? method)
+        {
+            if (method == null)
+                return null;
+
+            try
+            {
+                return (Func<object?>)method.CreateDelegate(typeof(Func<object?>));
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
         private static MethodInfo? SelectFactoryMethod(Type type, BJsonSerializerOptions options)
         {
             var staticFlags = BindingFlags.Static | BindingFlags.Public;
@@ -265,17 +345,17 @@ namespace Krampus.BinJson.Serialization.Metadata
             if (string.IsNullOrEmpty(name))
                 return name;
 
-            var chars = new List<char>(name.Length + 4);
+            var builder = new StringBuilder(name.Length + 4);
             for (int i = 0; i < name.Length; i++)
             {
                 var c = name[i];
                 if (i > 0 && char.IsUpper(c) && !char.IsUpper(name[i - 1]))
-                    chars.Add(separator);
+                    builder.Append(separator);
 
-                chars.Add(char.ToLowerInvariant(c));
+                builder.Append(char.ToLowerInvariant(c));
             }
 
-            return new string(chars.ToArray());
+            return builder.ToString();
         }
 
         private static ConstructorMetadata? SelectConstructor(Type type, BJsonSerializerOptions options)

@@ -216,7 +216,7 @@ public class ConfigWriter : MonoBehaviour
 ## Limitations
 
 ⚠️ **Span<T>**: `BJsonBinary.AsSpan()` requires Unity 2021.2+ or .NET Standard 2.1 full support.  
-⚠️ **No async I/O**: Serialization/deserialization are synchronous. Use Unity coroutines or background threads if needed.  
+ℹ️ **Async APIs are available**: BinJson provides async text/binary reader/writer APIs (`BJsonTextReaderAsync`, `BJsonTextWriterAsync`, `BJsonBinaryReaderAsync`, `BJsonBinaryWriterAsync`). In Unity projects, use them where your runtime profile and threading model permit.  
 ⚠️ **No schema validation**: BinJson is a DOM library, not a schema validator.  
 
 ---

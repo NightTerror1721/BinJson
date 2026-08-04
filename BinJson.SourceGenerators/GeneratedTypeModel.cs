@@ -34,6 +34,9 @@ namespace Krampus.BinJson.SourceGenerators
         /// <summary>Configuration from [BJsonSerializable] attribute</summary>
         public TypeConfiguration Configuration { get; }
 
+        /// <summary>Unique hint-name-safe identifier for generated source files.</summary>
+        public string HintName { get; set; } = string.Empty;
+
         /// <summary>All properties to serialize/deserialize</summary>
         public List<PropertyModel> Properties { get; } = new();
 
@@ -47,14 +50,20 @@ namespace Krampus.BinJson.SourceGenerators
         public MemberModel? ExtensionDataMember { get; set; }
 
         /// <summary>All members (properties + fields) for easy iteration</summary>
-        public IEnumerable<MemberModel> AllMembers
+        private List<MemberModel>? _allMembers;
+
+        public IReadOnlyList<MemberModel> AllMembers
         {
             get
             {
-                foreach (var prop in Properties)
-                    yield return prop;
-                foreach (var fd in Fields)
-                    yield return fd;
+                if (_allMembers is null)
+                {
+                    _allMembers = new List<MemberModel>(Properties.Count + Fields.Count);
+                    _allMembers.AddRange(Properties);
+                    _allMembers.AddRange(Fields);
+                }
+
+                return _allMembers;
             }
         }
 

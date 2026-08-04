@@ -16,10 +16,10 @@ namespace Krampus.BinJson.SourceGenerators
     {
         public void Initialize(IncrementalGeneratorInitializationContext context)
         {
-            var candidates = context.SyntaxProvider.CreateSyntaxProvider(
-                static (node, _) => node is ClassDeclarationSyntax cds && cds.AttributeLists.Count > 0 ||
-                                    node is StructDeclarationSyntax sds && sds.AttributeLists.Count > 0,
-                static (generatorContext, _) => AnalyzeType(generatorContext))
+            var candidates = context.SyntaxProvider.ForAttributeWithMetadataName(
+                fullyQualifiedMetadataName: "Krampus.BinJson.Serialization.BJsonSerializableAttribute",
+                predicate: static (node, _) => node is ClassDeclarationSyntax || node is StructDeclarationSyntax,
+                transform: static (generatorContext, _) => AnalyzeType(generatorContext.TargetSymbol as INamedTypeSymbol, generatorContext.SemanticModel.Compilation))
                 .Where(static result => result != null);
 
             context.RegisterSourceOutput(candidates, static (productionContext, result) =>
@@ -37,7 +37,10 @@ namespace Krampus.BinJson.SourceGenerators
                 if (result.Model != null)
                 {
                     var source = CodeEmitter.EmitSerializer(result.Model);
-                    productionContext.AddSource($"{result.Model.TypeName}.BJson.g.cs", SourceText.From(source, System.Text.Encoding.UTF8));
+                    var hintName = string.IsNullOrEmpty(result.Model.HintName)
+                        ? $"{result.Model.TypeName}.BJson.g.cs"
+                        : $"{result.Model.HintName}.BJson.g.cs";
+                    productionContext.AddSource(hintName, SourceText.From(source, System.Text.Encoding.UTF8));
                 }
             });
         }
@@ -45,21 +48,37 @@ namespace Krampus.BinJson.SourceGenerators
         /// <summary>
         /// Analyze a type declaration and build complete GeneratedTypeModel
         /// </summary>
-        private static AnalysisResult? AnalyzeType(GeneratorSyntaxContext context)
+        private static AnalysisResult? AnalyzeType(INamedTypeSymbol? symbol, Compilation compilation)
         {
             var diagnostics = new List<Diagnostic>();
-            INamedTypeSymbol? symbol = null;
-
-            if (context.Node is ClassDeclarationSyntax classDeclaration)
-                symbol = context.SemanticModel.GetDeclaredSymbol(classDeclaration) as INamedTypeSymbol;
-            else if (context.Node is StructDeclarationSyntax structDeclaration)
-                symbol = context.SemanticModel.GetDeclaredSymbol(structDeclaration) as INamedTypeSymbol;
 
             if (symbol == null)
                 return null;
 
+            if (symbol.IsGenericType)
+            {
+                diagnostics.Add(Diagnostic.Create(
+                    BJsonDiagnostics.UnsupportedTypeShape,
+                    symbol.Locations.FirstOrDefault() ?? Location.None,
+                    symbol.Name,
+                    "Open generic types are not supported in generated serializers."));
+                return new AnalysisResult(model: null, diagnostics);
+            }
+
+            if (symbol.ContainingType != null)
+            {
+                diagnostics.Add(Diagnostic.Create(
+                    BJsonDiagnostics.UnsupportedTypeShape,
+                    symbol.Locations.FirstOrDefault() ?? Location.None,
+                    symbol.Name,
+                    "Nested types are not supported in generated serializers."));
+                return new AnalysisResult(model: null, diagnostics);
+            }
+
+            var attributeSymbols = new AttributeParser.AttributeSymbols(compilation);
+
             // Parse [BJsonSerializable] attribute
-            var configuration = AttributeParser.ParseTypeConfiguration(symbol);
+            var configuration = AttributeParser.ParseTypeConfiguration(symbol, attributeSymbols);
             if (configuration == null)
                 return null;
 
@@ -82,13 +101,15 @@ namespace Krampus.BinJson.SourceGenerators
                 symbol.IsValueType,
                 configuration);
 
+            model.HintName = BuildHintName(symbol);
+
             // Analyze properties
             foreach (var member in symbol.GetMembers().OfType<IPropertySymbol>())
             {
-                if (!ShouldIncludeProperty(member, configuration))
+                if (!ShouldIncludeProperty(member, configuration, attributeSymbols))
                     continue;
 
-                var property = CreatePropertyModel(member, configuration);
+                var property = CreatePropertyModel(member, configuration, attributeSymbols, diagnostics);
                 if (property != null)
                     model.Properties.Add(property);
             }
@@ -102,10 +123,10 @@ namespace Krampus.BinJson.SourceGenerators
                     if (member.IsImplicitlyDeclared)
                         continue;
 
-                    if (!ShouldIncludeField(member, configuration))
+                    if (!ShouldIncludeField(member, configuration, attributeSymbols))
                         continue;
 
-                    var field = CreateFieldModel(member, configuration);
+                    var field = CreateFieldModel(member, configuration, attributeSymbols, diagnostics);
                     if (field != null)
                         model.Fields.Add(field);
                 }
@@ -149,7 +170,7 @@ namespace Krampus.BinJson.SourceGenerators
             }
 
             // Find constructor
-            model.Constructor = FindConstructor(symbol, diagnostics);
+            model.Constructor = FindConstructor(symbol, diagnostics, attributeSymbols);
 
             // Match constructor parameters to members (for JSON name resolution)
             if (model.Constructor != null)
@@ -172,7 +193,7 @@ namespace Krampus.BinJson.SourceGenerators
         /// <summary>
         /// Determine if a property should be included in serialization
         /// </summary>
-        private static bool ShouldIncludeProperty(IPropertySymbol property, TypeConfiguration config)
+        private static bool ShouldIncludeProperty(IPropertySymbol property, TypeConfiguration config, AttributeParser.AttributeSymbols symbols)
         {
             // Skip static properties
             if (property.IsStatic)
@@ -185,7 +206,9 @@ namespace Krampus.BinJson.SourceGenerators
             // Check for [BJsonIgnore] with Always condition
             var attrs = property.GetAttributes();
             var ignoreAttr = attrs.FirstOrDefault(a =>
-                a.AttributeClass?.ToDisplayString() == "Krampus.BinJson.Serialization.BJsonIgnoreAttribute");
+                symbols.BJsonIgnoreAttribute != null
+                    ? SymbolEqualityComparer.Default.Equals(a.AttributeClass, symbols.BJsonIgnoreAttribute)
+                    : string.Equals(a.AttributeClass?.ToDisplayString(), "Krampus.BinJson.Serialization.BJsonIgnoreAttribute", StringComparison.Ordinal));
 
             if (ignoreAttr != null)
             {
@@ -196,7 +219,9 @@ namespace Krampus.BinJson.SourceGenerators
 
             // Check for [BJsonInclude] - forces inclusion even if private
             var hasInclude = attrs.Any(a =>
-                a.AttributeClass?.ToDisplayString() == "Krampus.BinJson.Serialization.BJsonIncludeAttribute");
+                symbols.BJsonIncludeAttribute != null
+                    ? SymbolEqualityComparer.Default.Equals(a.AttributeClass, symbols.BJsonIncludeAttribute)
+                    : string.Equals(a.AttributeClass?.ToDisplayString(), "Krampus.BinJson.Serialization.BJsonIncludeAttribute", StringComparison.Ordinal));
 
             if (hasInclude)
                 return true;
@@ -215,7 +240,7 @@ namespace Krampus.BinJson.SourceGenerators
         /// <summary>
         /// Determine if a field should be included in serialization
         /// </summary>
-        private static bool ShouldIncludeField(IFieldSymbol field, TypeConfiguration config)
+        private static bool ShouldIncludeField(IFieldSymbol field, TypeConfiguration config, AttributeParser.AttributeSymbols symbols)
         {
             // Skip static fields
             if (field.IsStatic)
@@ -228,7 +253,9 @@ namespace Krampus.BinJson.SourceGenerators
             // Check for [BJsonIgnore] with Always condition
             var attrs = field.GetAttributes();
             var ignoreAttr = attrs.FirstOrDefault(a =>
-                a.AttributeClass?.ToDisplayString() == "Krampus.BinJson.Serialization.BJsonIgnoreAttribute");
+                symbols.BJsonIgnoreAttribute != null
+                    ? SymbolEqualityComparer.Default.Equals(a.AttributeClass, symbols.BJsonIgnoreAttribute)
+                    : string.Equals(a.AttributeClass?.ToDisplayString(), "Krampus.BinJson.Serialization.BJsonIgnoreAttribute", StringComparison.Ordinal));
 
             if (ignoreAttr != null)
             {
@@ -239,7 +266,9 @@ namespace Krampus.BinJson.SourceGenerators
 
             // Check for [BJsonInclude] - forces inclusion even if private
             var hasInclude = attrs.Any(a =>
-                a.AttributeClass?.ToDisplayString() == "Krampus.BinJson.Serialization.BJsonIncludeAttribute");
+                symbols.BJsonIncludeAttribute != null
+                    ? SymbolEqualityComparer.Default.Equals(a.AttributeClass, symbols.BJsonIncludeAttribute)
+                    : string.Equals(a.AttributeClass?.ToDisplayString(), "Krampus.BinJson.Serialization.BJsonIncludeAttribute", StringComparison.Ordinal));
 
             if (hasInclude)
                 return true;
@@ -258,7 +287,7 @@ namespace Krampus.BinJson.SourceGenerators
         /// <summary>
         /// Create PropertyModel from IPropertySymbol
         /// </summary>
-        private static PropertyModel? CreatePropertyModel(IPropertySymbol property, TypeConfiguration config)
+        private static PropertyModel? CreatePropertyModel(IPropertySymbol property, TypeConfiguration config, AttributeParser.AttributeSymbols symbols, List<Diagnostic> diagnostics)
         {
             var model = new PropertyModel(
                 property.Name,
@@ -272,7 +301,7 @@ namespace Krampus.BinJson.SourceGenerators
                 property.SetMethod != null);
 
             // Parse attributes
-            AttributeParser.ParseMemberAttributes(property, model);
+            AttributeParser.ParseMemberAttributes(property, model, symbols, diagnostics);
 
             // Determine JSON name
             if (model.JsonName == null)
@@ -286,7 +315,7 @@ namespace Krampus.BinJson.SourceGenerators
         /// <summary>
         /// Create FieldModel from IFieldSymbol
         /// </summary>
-        private static FieldModel? CreateFieldModel(IFieldSymbol field, TypeConfiguration config)
+        private static FieldModel? CreateFieldModel(IFieldSymbol field, TypeConfiguration config, AttributeParser.AttributeSymbols symbols, List<Diagnostic> diagnostics)
         {
             var model = new FieldModel(
                 field.Name,
@@ -298,7 +327,7 @@ namespace Krampus.BinJson.SourceGenerators
                 field.IsReadOnly);
 
             // Parse attributes
-            AttributeParser.ParseMemberAttributes(field, model);
+            AttributeParser.ParseMemberAttributes(field, model, symbols, diagnostics);
 
             // Determine JSON name
             if (model.JsonName == null)
@@ -312,7 +341,7 @@ namespace Krampus.BinJson.SourceGenerators
         /// <summary>
         /// Find appropriate constructor for deserialization
         /// </summary>
-        private static ConstructorModel? FindConstructor(INamedTypeSymbol symbol, List<Diagnostic> diagnostics)
+        private static ConstructorModel? FindConstructor(INamedTypeSymbol symbol, List<Diagnostic> diagnostics, AttributeParser.AttributeSymbols symbols)
         {
             var constructors = symbol.Constructors
                 .Where(c => !c.IsStatic)
@@ -320,7 +349,7 @@ namespace Krampus.BinJson.SourceGenerators
 
             // Look for constructors with [BJsonConstructor]
             var markedConstructors = constructors
-                .Where(c => AttributeParser.HasConstructorAttribute(c))
+                .Where(c => AttributeParser.HasConstructorAttribute(c, symbols))
                 .ToList();
 
             // Validate: only one constructor can be marked
@@ -336,12 +365,12 @@ namespace Krampus.BinJson.SourceGenerators
             }
 
             if (markedConstructors.Count > 0)
-                return CreateConstructorModel(markedConstructors.First(), hasAttribute: true);
+                return CreateConstructorModel(markedConstructors.First(), hasAttribute: true, symbols);
 
             // Find parameterless constructor
             var parameterlessConstructor = constructors.FirstOrDefault(c => c.Parameters.Length == 0);
             if (parameterlessConstructor != null)
-                return CreateConstructorModel(parameterlessConstructor, hasAttribute: false);
+                return CreateConstructorModel(parameterlessConstructor, hasAttribute: false, symbols);
 
             // For value types, use default constructor
             if (symbol.IsValueType)
@@ -354,7 +383,7 @@ namespace Krampus.BinJson.SourceGenerators
         /// <summary>
         /// Create ConstructorModel from IMethodSymbol
         /// </summary>
-        private static ConstructorModel CreateConstructorModel(IMethodSymbol constructor, bool hasAttribute)
+        private static ConstructorModel CreateConstructorModel(IMethodSymbol constructor, bool hasAttribute, AttributeParser.AttributeSymbols symbols)
         {
             var parameters = new List<ConstructorParameterModel>();
 
@@ -368,7 +397,9 @@ namespace Krampus.BinJson.SourceGenerators
 
                 // Check for [BJsonPropertyName] on the parameter itself
                 var propertyNameAttr = param.GetAttributes()
-                    .FirstOrDefault(a => a.AttributeClass?.Name == "BJsonPropertyNameAttribute");
+                    .FirstOrDefault(a => symbols.BJsonPropertyNameAttribute != null
+                        ? SymbolEqualityComparer.Default.Equals(a.AttributeClass, symbols.BJsonPropertyNameAttribute)
+                        : string.Equals(a.AttributeClass?.Name, "BJsonPropertyNameAttribute", StringComparison.Ordinal));
 
                 if (propertyNameAttr != null)
                 {
@@ -399,7 +430,13 @@ namespace Krampus.BinJson.SourceGenerators
             if (constructor.IsParameterless)
                 return;
 
-            var allMembers = model.AllMembers.ToList();
+            var allMembers = model.AllMembers;
+            var membersByJsonName = allMembers
+                .GroupBy(m => m.JsonName ?? m.MemberName, StringComparer.Ordinal)
+                .ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
+            var membersByName = allMembers
+                .GroupBy(m => m.MemberName, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
 
             foreach (var param in constructor.Parameters)
             {
@@ -407,8 +444,7 @@ namespace Krampus.BinJson.SourceGenerators
                 if (param.JsonName != null)
                 {
                     // Try to find member with matching JSON name
-                    var memberByJsonName = allMembers.FirstOrDefault(m =>
-                        string.Equals(m.JsonName, param.JsonName, StringComparison.Ordinal));
+                    membersByJsonName.TryGetValue(param.JsonName, out var memberByJsonName);
 
                     param.MatchingMember = memberByJsonName;
 
@@ -425,8 +461,7 @@ namespace Krampus.BinJson.SourceGenerators
                 }
 
                 // Try to match by parameter name (case-insensitive)
-                var memberByName = allMembers.FirstOrDefault(m =>
-                    string.Equals(m.MemberName, param.ParameterName, StringComparison.OrdinalIgnoreCase));
+                membersByName.TryGetValue(param.ParameterName, out var memberByName);
 
                 if (memberByName != null)
                 {
@@ -457,7 +492,13 @@ namespace Krampus.BinJson.SourceGenerators
             INamedTypeSymbol symbol,
             List<Diagnostic> diagnostics)
         {
-            var allMembers = model.AllMembers.ToList();
+            var allMembers = model.AllMembers;
+            var membersByJsonName = allMembers
+                .GroupBy(m => m.JsonName ?? m.MemberName, StringComparer.Ordinal)
+                .ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
+            var membersByName = allMembers
+                .GroupBy(m => m.MemberName, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
 
             foreach (var param in parameters)
             {
@@ -465,8 +506,7 @@ namespace Krampus.BinJson.SourceGenerators
                 if (param.JsonName != null)
                 {
                     // Try to find member with matching JSON name
-                    var memberByJsonName = allMembers.FirstOrDefault(m =>
-                        string.Equals(m.JsonName, param.JsonName, StringComparison.Ordinal));
+                    membersByJsonName.TryGetValue(param.JsonName, out var memberByJsonName);
 
                     param.MatchingMember = memberByJsonName;
 
@@ -483,8 +523,7 @@ namespace Krampus.BinJson.SourceGenerators
                 }
 
                 // Try to match by parameter name (case-insensitive)
-                var memberByName = allMembers.FirstOrDefault(m =>
-                    string.Equals(m.MemberName, param.ParameterName, StringComparison.OrdinalIgnoreCase));
+                membersByName.TryGetValue(param.ParameterName, out var memberByName);
 
                 if (memberByName != null)
                 {
@@ -543,6 +582,22 @@ namespace Krampus.BinJson.SourceGenerators
         private static ISymbol? GetMemberSymbol(INamedTypeSymbol typeSymbol, MemberModel member)
         {
             return typeSymbol.GetMembers(member.MemberName).FirstOrDefault();
+        }
+
+        private static string BuildHintName(INamedTypeSymbol symbol)
+        {
+            string fullName = symbol.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat);
+            var chars = fullName.ToCharArray();
+            for (int i = 0; i < chars.Length; i++)
+            {
+                char c = chars[i];
+                if (char.IsLetterOrDigit(c) || c == '_' || c == '.')
+                    continue;
+
+                chars[i] = '_';
+            }
+
+            return new string(chars);
         }
     }
 
