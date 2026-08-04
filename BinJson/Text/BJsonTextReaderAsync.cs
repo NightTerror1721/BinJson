@@ -1,6 +1,7 @@
 #nullable enable
 
 using System;
+using System.Buffers;
 using System.IO;
 using System.Text;
 using System.Threading;
@@ -28,7 +29,7 @@ namespace Krampus.BinJson.Text
 
             try
             {
-                string json = await Reader.ReadToEndAsync().ConfigureAwait(false);
+                string json = await ReadAllTextChunkedAsync(cancellationToken).ConfigureAwait(false);
                 cancellationToken.ThrowIfCancellationRequested();
                 return JsonTextParser.Parse(json, Options);
             }
@@ -58,6 +59,30 @@ namespace Krampus.BinJson.Text
 
             using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true, bufferSize: 1024, leaveOpen: leaveOpen);
             return await DeserializeAsync(reader, options, leaveOpen: false, cancellationToken).ConfigureAwait(false);
+        }
+
+        private async Task<string> ReadAllTextChunkedAsync(CancellationToken cancellationToken)
+        {
+            char[] buffer = ArrayPool<char>.Shared.Rent(8192);
+            try
+            {
+                var builder = new StringBuilder();
+                while (true)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    int read = await Reader.ReadAsync(buffer, 0, buffer.Length).ConfigureAwait(false);
+                    if (read == 0)
+                        break;
+
+                    builder.Append(buffer, 0, read);
+                }
+
+                return builder.ToString();
+            }
+            finally
+            {
+                ArrayPool<char>.Shared.Return(buffer, clearArray: false);
+            }
         }
     }
 }

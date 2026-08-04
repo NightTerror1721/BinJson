@@ -22,6 +22,12 @@ namespace Krampus.BinJson.Binary
                 core.Flush();
             }
 
+            if (buffer.TryGetBuffer(out var segment))
+            {
+                await Stream.WriteAsync(segment.Array!, segment.Offset, (int)buffer.Length, cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
             byte[] data = buffer.ToArray();
             await Stream.WriteAsync(data, 0, data.Length, cancellationToken).ConfigureAwait(false);
         }

@@ -9,6 +9,8 @@ namespace Krampus.BinJson.Text
 {
     internal sealed class BJsonTextWriterCore
     {
+        private const string HexDigits = "0123456789abcdef";
+
         private readonly TextWriter _writer;
         private readonly BJsonTextWriterOptions _options;
         private int _indentLevel;
@@ -78,7 +80,7 @@ namespace Krampus.BinJson.Text
                 throw new BJsonSerializationException("JSON text cannot represent NaN or Infinity.");
 
             string text = value.ToString("R", CultureInfo.InvariantCulture);
-            if (text.IndexOfAny(new[] { '.', 'e', 'E' }) < 0)
+            if (text.IndexOf('.') < 0 && text.IndexOf('e') < 0 && text.IndexOf('E') < 0)
                 text += ".0";
 
             _writer.Write(text);
@@ -87,8 +89,19 @@ namespace Krampus.BinJson.Text
         private void WriteString(string value)
         {
             _writer.Write('"');
-            foreach (char c in value)
+            ReadOnlySpan<char> source = value.AsSpan();
+            int segmentStart = 0;
+
+            for (int i = 0; i < source.Length; i++)
             {
+                char c = source[i];
+
+                if (!NeedsEscaping(c))
+                    continue;
+
+                if (i > segmentStart)
+                    _writer.Write(source.Slice(segmentStart, i - segmentStart));
+
                 switch (c)
                 {
                     case '"':
@@ -113,19 +126,34 @@ namespace Krampus.BinJson.Text
                         _writer.Write("\\t");
                         break;
                     default:
-                        if (c < ' ')
-                        {
-                            _writer.Write("\\u");
-                            _writer.Write(((int)c).ToString("x4"));
-                        }
-                        else
-                        {
-                            _writer.Write(c);
-                        }
+                        WriteHexEscape(c);
                         break;
                 }
+
+                segmentStart = i + 1;
             }
+
+            if (segmentStart < source.Length)
+                _writer.Write(source.Slice(segmentStart));
+
             _writer.Write('"');
+        }
+
+        private static bool NeedsEscaping(char c)
+        {
+            return c < ' ' || c == '"' || c == '\\';
+        }
+
+        private void WriteHexEscape(char c)
+        {
+            Span<char> escape = stackalloc char[6];
+            escape[0] = '\\';
+            escape[1] = 'u';
+            escape[2] = '0';
+            escape[3] = '0';
+            escape[4] = HexDigits[(c >> 4) & 0x0F];
+            escape[5] = HexDigits[c & 0x0F];
+            _writer.Write(escape);
         }
 
         private void WriteArray(BJsonArray array)

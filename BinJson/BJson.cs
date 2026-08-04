@@ -1,6 +1,7 @@
 #nullable enable
 
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using System.Threading;
@@ -127,7 +128,33 @@ namespace Krampus.BinJson
             return BJsonBinaryReader.Deserialize(data);
         }
 
+        public static BJsonValue Deserialize(byte[] data)
+        {
+            return BJsonBinaryReader.Deserialize(data);
+        }
+
+        public static BJsonValue Deserialize(ReadOnlyMemory<byte> data)
+        {
+            return BJsonBinaryReader.Deserialize(data);
+        }
+
         public static BJsonValue Deserialize(ReadOnlySpan<byte> data, BJsonBinaryReaderOptions options)
+        {
+            if (options is null)
+                throw new BJsonValidationException("Parameter 'options' cannot be null.");
+
+            return BJsonBinaryReader.Deserialize(data, options);
+        }
+
+        public static BJsonValue Deserialize(byte[] data, BJsonBinaryReaderOptions options)
+        {
+            if (options is null)
+                throw new BJsonValidationException("Parameter 'options' cannot be null.");
+
+            return BJsonBinaryReader.Deserialize(data, options);
+        }
+
+        public static BJsonValue Deserialize(ReadOnlyMemory<byte> data, BJsonBinaryReaderOptions options)
         {
             if (options is null)
                 throw new BJsonValidationException("Parameter 'options' cannot be null.");
@@ -148,6 +175,58 @@ namespace Krampus.BinJson
             return BJsonBinaryReaderAsync.DeserializeAsync(data, cancellationToken, options);
         }
 
+        public static void VisitBinary(Stream stream, BJsonBinaryVisitor visitor, bool leaveOpen = false)
+        {
+            BJsonBinaryReader.Visit(stream, visitor, leaveOpen);
+        }
+
+        public static void VisitBinary(Stream stream, BJsonBinaryVisitor visitor, BJsonBinaryReaderOptions options, bool leaveOpen = false)
+        {
+            if (options is null)
+                throw new BJsonValidationException("Parameter 'options' cannot be null.");
+
+            BJsonBinaryReader.Visit(stream, visitor, leaveOpen, options);
+        }
+
+        public static void VisitBinary(ReadOnlyMemory<byte> data, BJsonBinaryVisitor visitor)
+        {
+            BJsonBinaryReader.Visit(data, visitor);
+        }
+
+        public static void VisitBinary(byte[] data, BJsonBinaryVisitor visitor)
+        {
+            BJsonBinaryReader.Visit(data, visitor);
+        }
+
+        public static void VisitBinary(ReadOnlyMemory<byte> data, BJsonBinaryVisitor visitor, BJsonBinaryReaderOptions options)
+        {
+            if (options is null)
+                throw new BJsonValidationException("Parameter 'options' cannot be null.");
+
+            BJsonBinaryReader.Visit(data, visitor, options);
+        }
+
+        public static void VisitBinary(byte[] data, BJsonBinaryVisitor visitor, BJsonBinaryReaderOptions options)
+        {
+            if (options is null)
+                throw new BJsonValidationException("Parameter 'options' cannot be null.");
+
+            BJsonBinaryReader.Visit(data, visitor, options);
+        }
+
+        public static void VisitBinary(ReadOnlySpan<byte> data, BJsonBinaryVisitor visitor)
+        {
+            BJsonBinaryReader.Visit(data, visitor);
+        }
+
+        public static void VisitBinary(ReadOnlySpan<byte> data, BJsonBinaryVisitor visitor, BJsonBinaryReaderOptions options)
+        {
+            if (options is null)
+                throw new BJsonValidationException("Parameter 'options' cannot be null.");
+
+            BJsonBinaryReader.Visit(data, visitor, options);
+        }
+
         public static bool TryDeserialize(ReadOnlySpan<byte> data, out BJsonValue value)
         {
             try
@@ -160,6 +239,98 @@ namespace Krampus.BinJson
                 value = BJsonValue.Null;
                 return false;
             }
+        }
+
+        public static bool TryDeserialize(byte[] data, out BJsonValue value)
+        {
+            try
+            {
+                value = BJsonBinaryReader.Deserialize(data);
+                return true;
+            }
+            catch
+            {
+                value = BJsonValue.Null;
+                return false;
+            }
+        }
+
+        public static bool TryReadBinaryRootObjectProperty(ReadOnlyMemory<byte> data, string propertyName, out BJsonValue value)
+        {
+            return BJsonBinaryReader.TryReadRootObjectProperty(data, propertyName, out value);
+        }
+
+        public static bool TryReadBinaryRootObjectProperty(byte[] data, string propertyName, out BJsonValue value)
+        {
+            return BJsonBinaryReader.TryReadRootObjectProperty(data, propertyName, out value);
+        }
+
+        public static bool TryReadBinaryRootObjectProperty(ReadOnlySpan<byte> data, string propertyName, out BJsonValue value)
+        {
+            return BJsonBinaryReader.TryReadRootObjectProperty(data, propertyName, out value);
+        }
+
+        public static BJsonObject ReadBinaryRootObjectProperties(ReadOnlyMemory<byte> data, IReadOnlyList<string> propertyNames)
+        {
+            return BJsonBinaryReader.ReadRootObjectProperties(data, propertyNames);
+        }
+
+        public static BJsonObject ReadBinaryRootObjectProperties(byte[] data, IReadOnlyList<string> propertyNames)
+        {
+            return BJsonBinaryReader.ReadRootObjectProperties(data, propertyNames);
+        }
+
+        public static BJsonObject ReadBinaryRootObjectProperties(ReadOnlySpan<byte> data, IReadOnlyList<string> propertyNames)
+        {
+            return BJsonBinaryReader.ReadRootObjectProperties(data, propertyNames);
+        }
+
+        public static bool TryReadBinaryRootObjectProperty(ReadOnlyMemory<byte> data, string propertyName, out BJsonValue value, BJsonBinaryReaderOptions options)
+        {
+            if (options is null)
+                throw new BJsonValidationException("Parameter 'options' cannot be null.");
+
+            return BJsonBinaryReader.TryReadRootObjectProperty(data, propertyName, out value, options);
+        }
+
+        public static bool TryReadBinaryRootObjectProperty(byte[] data, string propertyName, out BJsonValue value, BJsonBinaryReaderOptions options)
+        {
+            if (options is null)
+                throw new BJsonValidationException("Parameter 'options' cannot be null.");
+
+            return BJsonBinaryReader.TryReadRootObjectProperty(data, propertyName, out value, options);
+        }
+
+        public static bool TryReadBinaryRootObjectProperty(ReadOnlySpan<byte> data, string propertyName, out BJsonValue value, BJsonBinaryReaderOptions options)
+        {
+            if (options is null)
+                throw new BJsonValidationException("Parameter 'options' cannot be null.");
+
+            return BJsonBinaryReader.TryReadRootObjectProperty(data, propertyName, out value, options);
+        }
+
+        public static BJsonObject ReadBinaryRootObjectProperties(ReadOnlyMemory<byte> data, IReadOnlyList<string> propertyNames, BJsonBinaryReaderOptions options)
+        {
+            if (options is null)
+                throw new BJsonValidationException("Parameter 'options' cannot be null.");
+
+            return BJsonBinaryReader.ReadRootObjectProperties(data, propertyNames, options);
+        }
+
+        public static BJsonObject ReadBinaryRootObjectProperties(byte[] data, IReadOnlyList<string> propertyNames, BJsonBinaryReaderOptions options)
+        {
+            if (options is null)
+                throw new BJsonValidationException("Parameter 'options' cannot be null.");
+
+            return BJsonBinaryReader.ReadRootObjectProperties(data, propertyNames, options);
+        }
+
+        public static BJsonObject ReadBinaryRootObjectProperties(ReadOnlySpan<byte> data, IReadOnlyList<string> propertyNames, BJsonBinaryReaderOptions options)
+        {
+            if (options is null)
+                throw new BJsonValidationException("Parameter 'options' cannot be null.");
+
+            return BJsonBinaryReader.ReadRootObjectProperties(data, propertyNames, options);
         }
 
         public static async Task<(bool Success, BJsonValue Value)> TryDeserializeAsync(ReadOnlyMemory<byte> data, CancellationToken cancellationToken = default)
@@ -176,6 +347,11 @@ namespace Krampus.BinJson
         }
 
         public static T? Deserialize<T>(ReadOnlySpan<byte> data, BJsonSerializerOptions? options)
+        {
+            return Deserialize<T>(BJsonBinaryReader.Deserialize(data), options);
+        }
+
+        public static T? Deserialize<T>(byte[] data, BJsonSerializerOptions? options)
         {
             return Deserialize<T>(BJsonBinaryReader.Deserialize(data), options);
         }
@@ -325,6 +501,21 @@ namespace Krampus.BinJson
         public static Task<BJsonValue> ParseJsonAsync(Stream stream, BJsonTextReaderOptions? options, bool leaveOpen = false, CancellationToken cancellationToken = default)
         {
             return BJsonTextReaderAsync.DeserializeAsync(stream, options, leaveOpen, cancellationToken);
+        }
+
+        public static void VisitText(string json, BJsonTextVisitor visitor, BJsonTextReaderOptions? options = null)
+        {
+            BJsonTextReader.Visit(json, visitor, options);
+        }
+
+        public static bool TryReadTextRootObjectProperty(string json, string propertyName, out BJsonValue value, BJsonTextReaderOptions? options = null)
+        {
+            return BJsonTextReader.TryReadRootObjectProperty(json, propertyName, out value, options);
+        }
+
+        public static BJsonObject ReadTextRootObjectProperties(string json, IReadOnlyList<string> propertyNames, BJsonTextReaderOptions? options = null)
+        {
+            return BJsonTextReader.ReadRootObjectProperties(json, propertyNames, options);
         }
 
         public static BJsonValue ParseFile(string filePath, BJsonTextReaderOptions? options = null, Encoding? encoding = null)

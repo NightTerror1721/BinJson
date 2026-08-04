@@ -521,6 +521,175 @@ namespace Krampus.BinJson.Tests
             Assert.True(parsed.IsNull);
         }
 
+        [Fact]
+        public void Visit_NestedPayload_ProducesExpectedEvents()
+        {
+            var value = BJsonValue.Create(new BJsonObject
+            {
+                ["id"] = 42,
+                ["items"] = new BJsonArray { true, false, 7 },
+                ["meta"] = new BJsonObject
+                {
+                    ["name"] = "alice"
+                }
+            });
+
+            byte[] payload = BJsonBinaryWriter.Serialize(value);
+            var visitor = new RecordingBinaryVisitor();
+
+            BJsonBinaryReader.Visit(payload, visitor);
+
+            Assert.Equal(new[]
+            {
+                "doc:start",
+                "obj:start:3",
+                "prop:0:id",
+                "uint:42",
+                "prop:1:items",
+                "arr:start:3:False",
+                "bool:True",
+                "bool:False",
+                "uint:7",
+                "arr:end:3:False",
+                "prop:2:meta",
+                "obj:start:1",
+                "prop:0:name",
+                "str:alice",
+                "obj:end:1",
+                "obj:end:3",
+                "doc:end"
+            }, visitor.Events);
+        }
+
+        [Fact]
+        public void Visit_RepeatedPayload_AllocatesLessThanDomParse()
+        {
+            var payload = BJsonBinaryWriter.Serialize(BJsonValue.Create(new BJsonObject
+            {
+                ["items"] = new BJsonArray
+                {
+                    new BJsonObject { ["kind"] = "entity", ["zone"] = "overworld", ["name"] = "npc_0" },
+                    new BJsonObject { ["kind"] = "entity", ["zone"] = "overworld", ["name"] = "npc_1" },
+                    new BJsonObject { ["kind"] = "entity", ["zone"] = "overworld", ["name"] = "npc_2" },
+                    new BJsonObject { ["kind"] = "entity", ["zone"] = "overworld", ["name"] = "npc_3" },
+                }
+            }));
+
+            long domBytes = MeasureAllocatedBytes(() =>
+            {
+                var parsed = BJsonBinaryReader.Deserialize(payload);
+                _ = parsed.ObjectValue.Count;
+            }, iterations: 200);
+
+            long visitorBytes = MeasureAllocatedBytes(() =>
+            {
+                var visitor = new CountingBinaryVisitor();
+                BJsonBinaryReader.Visit(payload, visitor);
+                _ = visitor.ScalarCount;
+            }, iterations: 200);
+
+            Assert.True(visitorBytes < domBytes, $"Expected visitor allocation ({visitorBytes}) to be lower than DOM allocation ({domBytes}).");
+        }
+
+        [Fact]
+        public void TryReadRootObjectProperty_ReturnsRequestedValue_WithoutFullDom()
+        {
+            var payload = BJsonBinaryWriter.Serialize(BJsonValue.Create(new BJsonObject
+            {
+                ["header"] = "v1",
+                ["config"] = new BJsonObject
+                {
+                    ["enabled"] = true,
+                    ["retries"] = 3,
+                },
+                ["items"] = new BJsonArray { 1, 2, 3 },
+            }));
+
+            bool found = BJsonBinaryReader.TryReadRootObjectProperty(payload, "config", out var value);
+
+            Assert.True(found);
+            Assert.True(value.IsObject);
+            Assert.True(value.ObjectValue.TryGetBool("enabled", out var enabled));
+            Assert.True(enabled);
+            Assert.True(value.ObjectValue.TryGetInt("retries", out var retries));
+            Assert.Equal(3, retries);
+        }
+
+        [Fact]
+        public void TryReadRootObjectProperty_MissingValue_ReturnsFalse()
+        {
+            var payload = BJsonBinaryWriter.Serialize(BJsonValue.Create(new BJsonObject
+            {
+                ["id"] = 1,
+                ["name"] = "alice",
+            }));
+
+            bool found = BJsonBinaryReader.TryReadRootObjectProperty(payload, "missing", out var value);
+
+            Assert.False(found);
+            Assert.True(value.IsNull);
+        }
+
+        [Fact]
+        public void TryReadRootObjectProperty_NonObjectRoot_Throws()
+        {
+            byte[] payload = BJsonBinaryWriter.Serialize(BJsonValue.Create(new BJsonArray { 1, 2, 3 }));
+
+            var ex = Assert.Throws<Krampus.BinJson.Error.BJsonBinaryFormatException>(() => BJsonBinaryReader.TryReadRootObjectProperty(payload, "id", out _));
+            Assert.Contains("Root value is not an object", ex.Message);
+        }
+
+        [Fact]
+        public void ReadRootObjectProperties_ReturnsOnlyRequestedKeys_InSinglePass()
+        {
+            var payload = BJsonBinaryWriter.Serialize(BJsonValue.Create(new BJsonObject
+            {
+                ["id"] = 7,
+                ["name"] = "alice",
+                ["meta"] = new BJsonObject { ["active"] = true },
+                ["tags"] = new BJsonArray { "a", "b" }
+            }));
+
+            var selected = BJsonBinaryReader.ReadRootObjectProperties(payload, new[] { "name", "meta", "missing", "name" });
+
+            Assert.Equal(2, selected.Count);
+            Assert.True(selected.TryGetString("name", out var name));
+            Assert.Equal("alice", name);
+            Assert.True(selected.TryGetObject("meta", out var meta));
+            Assert.True(meta.TryGetBool("active", out var active));
+            Assert.True(active);
+            Assert.False(selected.ContainsKey("missing"));
+        }
+
+        [Fact]
+        public void ReadRootObjectProperties_HandlesStringRefKeys()
+        {
+            var value = BJsonValue.Create(new BJsonObject
+            {
+                ["kind"] = "entity",
+                ["name"] = "alpha",
+                ["details"] = new BJsonObject
+                {
+                    ["kind"] = "child",
+                    ["name"] = "beta"
+                }
+            });
+
+            byte[] payload = BJsonBinaryWriter.Serialize(value, new BJsonBinaryWriterOptions
+            {
+                EnableStringTable = true,
+                EnablePackedArrays = true,
+            });
+
+            var selected = BJsonBinaryReader.ReadRootObjectProperties(payload, new[] { "kind", "name" });
+
+            Assert.Equal(2, selected.Count);
+            Assert.True(selected.TryGetString("kind", out var kind));
+            Assert.Equal("entity", kind);
+            Assert.True(selected.TryGetString("name", out var name));
+            Assert.Equal("alpha", name);
+        }
+
         private static void AssertRoundTrip(BJsonValue value)
         {
             var roundTripped = RoundTrip(value);
@@ -532,6 +701,55 @@ namespace Krampus.BinJson.Tests
         {
             byte[] bytes = BJsonBinaryWriter.Serialize(value);
             return BJsonBinaryReader.Deserialize(bytes);
+        }
+
+        private static long MeasureAllocatedBytes(Action action, int iterations)
+        {
+            for (int i = 0; i < 8; i++)
+                action();
+
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+
+            long start = GC.GetAllocatedBytesForCurrentThread();
+            for (int i = 0; i < iterations; i++)
+                action();
+            long end = GC.GetAllocatedBytesForCurrentThread();
+            return end - start;
+        }
+
+        private sealed class RecordingBinaryVisitor : BJsonBinaryVisitor
+        {
+            public string[] Events => _events.ToArray();
+
+            private readonly System.Collections.Generic.List<string> _events = new System.Collections.Generic.List<string>();
+
+            public override void OnDocumentStart() => _events.Add("doc:start");
+            public override void OnDocumentEnd() => _events.Add("doc:end");
+            public override void OnBoolean(bool value) => _events.Add($"bool:{value}");
+            public override void OnUnsignedInteger(ulong value) => _events.Add($"uint:{value}");
+            public override void OnSignedInteger(long value) => _events.Add($"int:{value}");
+            public override void OnFloat(double value) => _events.Add($"float:{value}");
+            public override void OnString(string value) => _events.Add($"str:{value}");
+            public override void OnArrayStart(int count, bool isPacked) => _events.Add($"arr:start:{count}:{isPacked}");
+            public override void OnArrayEnd(int count, bool isPacked) => _events.Add($"arr:end:{count}:{isPacked}");
+            public override void OnObjectStart(int count) => _events.Add($"obj:start:{count}");
+            public override void OnObjectProperty(string propertyName, int index) => _events.Add($"prop:{index}:{propertyName}");
+            public override void OnObjectEnd(int count) => _events.Add($"obj:end:{count}");
+        }
+
+        private sealed class CountingBinaryVisitor : BJsonBinaryVisitor
+        {
+            public int ScalarCount { get; private set; }
+
+            public override void OnNull() => ScalarCount++;
+            public override void OnBoolean(bool value) => ScalarCount++;
+            public override void OnSignedInteger(long value) => ScalarCount++;
+            public override void OnUnsignedInteger(ulong value) => ScalarCount++;
+            public override void OnFloat(double value) => ScalarCount++;
+            public override void OnString(string value) => ScalarCount++;
+            public override void OnBinary(ReadOnlySpan<byte> data) => ScalarCount++;
         }
     }
 }

@@ -34,20 +34,55 @@ namespace Krampus.BinJson.Text
 
             var parser = new JsonTextParser(json, options.AllowComments);
             var value = parser.ParseValue();
-            parser.SkipWhitespace();
-
-            if (parser._position < parser._json.Length)
-                throw parser.CreateParseException(
-                    $"Unexpected character at position {parser._position}: expected end of JSON.",
-                    parser._position,
-                    errorCode: BJsonErrorCode.ParseUnexpectedTrailingChar,
-                    details: new Dictionary<string, object?>
-                    {
-                        ["expected"] = "end of JSON",
-                        ["found"] = parser._json[parser._position].ToString()
-                    });
+            parser.EnsureEndOfJson();
 
             return value;
+        }
+
+        public static void Visit(string json, BJsonTextVisitor visitor, BJsonTextReaderOptions? options = null)
+        {
+            if (json is null)
+                throw new BJsonValidationException("Parameter 'json' cannot be null.");
+            if (visitor is null)
+                throw new BJsonValidationException("Parameter 'visitor' cannot be null.");
+
+            options ??= BJsonTextReaderOptions.Default;
+
+            var parser = new JsonTextParser(json, options.AllowComments);
+            visitor.OnDocumentStart();
+            parser.VisitValue(visitor);
+            parser.EnsureEndOfJson();
+            visitor.OnDocumentEnd();
+        }
+
+        public static bool TryReadRootObjectProperty(string json, string propertyName, out BJsonValue value, BJsonTextReaderOptions? options = null)
+        {
+            if (json is null)
+                throw new BJsonValidationException("Parameter 'json' cannot be null.");
+            if (propertyName is null)
+                throw new BJsonValidationException("Parameter 'propertyName' cannot be null.");
+
+            options ??= BJsonTextReaderOptions.Default;
+
+            var parser = new JsonTextParser(json, options.AllowComments);
+            bool found = parser.TryReadRootObjectPropertyCore(propertyName, out value);
+            parser.EnsureEndOfJson();
+            return found;
+        }
+
+        public static BJsonObject ReadRootObjectProperties(string json, IReadOnlyList<string> propertyNames, BJsonTextReaderOptions? options = null)
+        {
+            if (json is null)
+                throw new BJsonValidationException("Parameter 'json' cannot be null.");
+            if (propertyNames is null)
+                throw new BJsonValidationException("Parameter 'propertyNames' cannot be null.");
+
+            options ??= BJsonTextReaderOptions.Default;
+
+            var parser = new JsonTextParser(json, options.AllowComments);
+            BJsonObject selected = parser.ReadRootObjectPropertiesCore(propertyNames);
+            parser.EnsureEndOfJson();
+            return selected;
         }
 
         private BJsonValue ParseValue()
@@ -79,6 +114,206 @@ namespace Krampus.BinJson.Text
                 new Dictionary<string, object?> { ["found"] = c.ToString() });
         }
 
+        private void VisitValue(BJsonTextVisitor visitor)
+        {
+            SkipWhitespace();
+
+            if (_position >= _json.Length)
+                throw CreateParseException("Unexpected end of JSON.", _position, BJsonErrorCode.ParseUnexpectedEof);
+
+            char c = _json[_position];
+            if (c == 'n')
+            {
+                ParseNull();
+                visitor.OnNull();
+                return;
+            }
+
+            if (c == 't' || c == 'f')
+            {
+                BJsonValue value = ParseBoolean();
+                visitor.OnBoolean(value.BoolValue);
+                return;
+            }
+
+            if (c == '"')
+            {
+                visitor.OnString(ParseStringValue());
+                return;
+            }
+
+            if (c == '[')
+            {
+                VisitArray(visitor);
+                return;
+            }
+
+            if (c == '{')
+            {
+                VisitObject(visitor);
+                return;
+            }
+
+            if (c == '-' || char.IsDigit(c))
+            {
+                EmitScalarNumber(visitor, ParseNumber());
+                return;
+            }
+
+            throw CreateParseException(
+                $"Unexpected character at position {_position}: '{c}'",
+                _position,
+                BJsonErrorCode.ParseUnexpectedChar,
+                new Dictionary<string, object?> { ["found"] = c.ToString() });
+        }
+
+        private bool TryReadRootObjectPropertyCore(string propertyName, out BJsonValue value)
+        {
+            value = BJsonValue.Null;
+            bool found = false;
+
+            SkipWhitespace();
+            if (_position >= _json.Length || _json[_position] != '{')
+                throw CreateParseException($"Expected '{{' at position {_position}.", _position, BJsonErrorCode.ParseExpectedObjectStart);
+
+            _position++;
+            SkipWhitespace();
+
+            if (_position < _json.Length && _json[_position] == '}')
+            {
+                _position++;
+                return false;
+            }
+
+            var seenKeys = new HashSet<string>(StringComparer.Ordinal);
+
+            while (true)
+            {
+                SkipWhitespace();
+                if (_position >= _json.Length || _json[_position] != '"')
+                    throw CreateParseException($"Expected property name (string) at position {_position}.", _position, BJsonErrorCode.ParseExpectedPropertyName);
+
+                string key = ParseStringValue();
+                if (!seenKeys.Add(key))
+                    throw CreateParseException($"Duplicate key '{key}' in object at position {_position}.", _position, BJsonErrorCode.ParseDuplicateKey, new Dictionary<string, object?> { ["key"] = key });
+
+                SkipWhitespace();
+                if (_position >= _json.Length || _json[_position] != ':')
+                    throw CreateParseException($"Expected ':' after property name at position {_position}.", _position, BJsonErrorCode.ParseExpectedColon);
+
+                _position++;
+
+                PushPropertyPathSegment(key);
+                try
+                {
+                    if (!found && string.Equals(key, propertyName, StringComparison.Ordinal))
+                    {
+                        value = ParseValue();
+                        found = true;
+                    }
+                    else
+                    {
+                        SkipValue();
+                    }
+                }
+                finally
+                {
+                    PopPathSegment();
+                }
+
+                SkipWhitespace();
+                if (_position >= _json.Length)
+                    throw CreateParseException("Unexpected end of JSON in object.", _position, BJsonErrorCode.ParseUnexpectedEofInObject);
+
+                if (_json[_position] == '}')
+                {
+                    _position++;
+                    return found;
+                }
+
+                if (_json[_position] != ',')
+                    throw CreateParseException($"Expected ',' or '}}' at position {_position}.", _position, BJsonErrorCode.ParseExpectedObjectSeparator);
+
+                _position++;
+            }
+        }
+
+        private BJsonObject ReadRootObjectPropertiesCore(IReadOnlyList<string> propertyNames)
+        {
+            var selected = new BJsonObject(propertyNames.Count);
+            if (propertyNames.Count == 0)
+            {
+                SkipWhitespace();
+                if (_position >= _json.Length || _json[_position] != '{')
+                    throw CreateParseException($"Expected '{{' at position {_position}.", _position, BJsonErrorCode.ParseExpectedObjectStart);
+
+                _position++;
+                SkipObjectBody();
+                return selected;
+            }
+
+            var wanted = new HashSet<string>(propertyNames, StringComparer.Ordinal);
+
+            SkipWhitespace();
+            if (_position >= _json.Length || _json[_position] != '{')
+                throw CreateParseException($"Expected '{{' at position {_position}.", _position, BJsonErrorCode.ParseExpectedObjectStart);
+
+            _position++;
+            SkipWhitespace();
+            if (_position < _json.Length && _json[_position] == '}')
+            {
+                _position++;
+                return selected;
+            }
+
+            var seenKeys = new HashSet<string>(StringComparer.Ordinal);
+
+            while (true)
+            {
+                SkipWhitespace();
+                if (_position >= _json.Length || _json[_position] != '"')
+                    throw CreateParseException($"Expected property name (string) at position {_position}.", _position, BJsonErrorCode.ParseExpectedPropertyName);
+
+                string key = ParseStringValue();
+                if (!seenKeys.Add(key))
+                    throw CreateParseException($"Duplicate key '{key}' in object at position {_position}.", _position, BJsonErrorCode.ParseDuplicateKey, new Dictionary<string, object?> { ["key"] = key });
+
+                SkipWhitespace();
+                if (_position >= _json.Length || _json[_position] != ':')
+                    throw CreateParseException($"Expected ':' after property name at position {_position}.", _position, BJsonErrorCode.ParseExpectedColon);
+
+                _position++;
+
+                PushPropertyPathSegment(key);
+                try
+                {
+                    if (wanted.Contains(key) && !selected.ContainsKey(key))
+                        selected.Add(key, ParseValue());
+                    else
+                        SkipValue();
+                }
+                finally
+                {
+                    PopPathSegment();
+                }
+
+                SkipWhitespace();
+                if (_position >= _json.Length)
+                    throw CreateParseException("Unexpected end of JSON in object.", _position, BJsonErrorCode.ParseUnexpectedEofInObject);
+
+                if (_json[_position] == '}')
+                {
+                    _position++;
+                    return selected;
+                }
+
+                if (_json[_position] != ',')
+                    throw CreateParseException($"Expected ',' or '}}' at position {_position}.", _position, BJsonErrorCode.ParseExpectedObjectSeparator);
+
+                _position++;
+            }
+        }
+
         private BJsonValue ParseNull()
         {
             if (!TryConsume("null"))
@@ -98,11 +333,36 @@ namespace Krampus.BinJson.Text
 
         private BJsonValue ParseString()
         {
+            return BJsonValue.Create(ParseStringValue());
+        }
+
+        private string ParseStringValue()
+        {
             if (_json[_position] != '"')
                 throw CreateParseException($"Expected '\"' at position {_position}.", _position, BJsonErrorCode.ParseExpectedStringStart);
 
             _position++;
-            var sb = new StringBuilder();
+
+            int rawStart = _position;
+            while (_position < _json.Length)
+            {
+                char c = _json[_position];
+                if (c == '"')
+                {
+                    string value = _json.Substring(rawStart, _position - rawStart);
+                    _position++;
+                    return value;
+                }
+
+                if (c == '\\' || c < ' ')
+                    break;
+
+                _position++;
+            }
+
+            var sb = new StringBuilder(Math.Min(256, _json.Length - rawStart));
+            if (_position > rawStart)
+                sb.Append(_json, rawStart, _position - rawStart);
 
             while (_position < _json.Length)
             {
@@ -111,7 +371,7 @@ namespace Krampus.BinJson.Text
                 if (c == '"')
                 {
                     _position++;
-                    return BJsonValue.Create(sb.ToString());
+                    return sb.ToString();
                 }
 
                 if (c == '\\')
@@ -179,18 +439,53 @@ namespace Krampus.BinJson.Text
             if (_position + 4 > _json.Length)
                 throw CreateParseException("Incomplete Unicode escape sequence.", _position, BJsonErrorCode.ParseIncompleteUnicodeEscape);
 
-            string hex = _json.Substring(_position, 4);
+            int start = _position;
+            int codePoint = 0;
+            for (int i = 0; i < 4; i++)
+            {
+                int value = ParseHexDigit(_json[_position + i]);
+                if (value < 0)
+                {
+                    string hex = _json.Substring(start, 4);
+                    throw CreateParseException($"Invalid Unicode escape sequence '\\u{hex}'.", start, BJsonErrorCode.ParseInvalidUnicodeEscape);
+                }
+
+                codePoint = (codePoint << 4) | value;
+            }
+
             _position += 4;
-
-            if (!ushort.TryParse(hex, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out ushort codePoint))
-                throw CreateParseException($"Invalid Unicode escape sequence '\\u{hex}'.", _position - 4, BJsonErrorCode.ParseInvalidUnicodeEscape);
-
             return (char)codePoint;
         }
 
         private BJsonValue ParseNumber()
         {
-            int start = _position;
+            ParseNumberToken(out int start, out int length, out bool isFloat);
+            ReadOnlySpan<char> numberSpan = _json.AsSpan(start, length);
+
+            if (isFloat)
+            {
+                if (!double.TryParse(numberSpan, NumberStyles.Float, CultureInfo.InvariantCulture, out double d))
+                    throw CreateParseException($"Invalid float number '{new string(numberSpan)}' at position {start}.", start, BJsonErrorCode.ParseInvalidFloat);
+                return BJsonValue.Create(d);
+            }
+            else
+            {
+                if (long.TryParse(numberSpan, NumberStyles.Integer, CultureInfo.InvariantCulture, out long l))
+                    return BJsonValue.Create(l);
+
+                if (ulong.TryParse(numberSpan, NumberStyles.Integer, CultureInfo.InvariantCulture, out ulong ul))
+                    return BJsonValue.Create(ul);
+
+                if (double.TryParse(numberSpan, NumberStyles.Float, CultureInfo.InvariantCulture, out double d))
+                    return BJsonValue.Create(d);
+
+                throw CreateParseException($"Number '{new string(numberSpan)}' is out of range at position {start}.", start, BJsonErrorCode.ParseNumberOutOfRange);
+            }
+        }
+
+        private void ParseNumberToken(out int start, out int length, out bool isFloat)
+        {
+            start = _position;
 
             if (_json[_position] == '-')
                 _position++;
@@ -208,7 +503,7 @@ namespace Krampus.BinJson.Text
                     _position++;
             }
 
-            bool isFloat = false;
+            isFloat = false;
 
             if (_position < _json.Length && _json[_position] == '.')
             {
@@ -237,27 +532,7 @@ namespace Krampus.BinJson.Text
                     _position++;
             }
 
-            string numberText = _json.Substring(start, _position - start);
-
-            if (isFloat)
-            {
-                if (!double.TryParse(numberText, NumberStyles.Float, CultureInfo.InvariantCulture, out double d))
-                    throw CreateParseException($"Invalid float number '{numberText}' at position {start}.", start, BJsonErrorCode.ParseInvalidFloat);
-                return BJsonValue.Create(d);
-            }
-            else
-            {
-                if (long.TryParse(numberText, NumberStyles.Integer, CultureInfo.InvariantCulture, out long l))
-                    return BJsonValue.Create(l);
-
-                if (ulong.TryParse(numberText, NumberStyles.Integer, CultureInfo.InvariantCulture, out ulong ul))
-                    return BJsonValue.Create(ul);
-
-                if (double.TryParse(numberText, NumberStyles.Float, CultureInfo.InvariantCulture, out double d))
-                    return BJsonValue.Create(d);
-
-                throw CreateParseException($"Number '{numberText}' is out of range at position {start}.", start, BJsonErrorCode.ParseNumberOutOfRange);
-            }
+            length = _position - start;
         }
 
         private BJsonValue ParseArray()
@@ -330,7 +605,7 @@ namespace Krampus.BinJson.Text
                 if (_position >= _json.Length || _json[_position] != '"')
                     throw CreateParseException($"Expected property name (string) at position {_position}.", _position, BJsonErrorCode.ParseExpectedPropertyName);
 
-                string key = ParseString().StringValue;
+                string key = ParseStringValue();
 
                 SkipWhitespace();
 
@@ -350,14 +625,12 @@ namespace Krampus.BinJson.Text
                     PopPathSegment();
                 }
 
-                if (obj.ContainsKey(key))
+                if (!obj.TryAdd(key, value))
                     throw CreateParseException(
                         $"Duplicate key '{key}' in object at position {_position}.",
                         _position,
                         BJsonErrorCode.ParseDuplicateKey,
                         new Dictionary<string, object?> { ["key"] = key });
-
-                obj.Add(key, value);
 
                 SkipWhitespace();
 
@@ -375,6 +648,332 @@ namespace Krampus.BinJson.Text
 
                 _position++;
             }
+        }
+
+        private void VisitArray(BJsonTextVisitor visitor)
+        {
+            if (_json[_position] != '[')
+                throw CreateParseException($"Expected '[' at position {_position}.", _position, BJsonErrorCode.ParseExpectedArrayStart);
+
+            visitor.OnArrayStart();
+            _position++;
+            SkipWhitespace();
+
+            if (_position < _json.Length && _json[_position] == ']')
+            {
+                _position++;
+                visitor.OnArrayEnd();
+                return;
+            }
+
+            int index = 0;
+            while (true)
+            {
+                PushIndexPathSegment(index);
+                try
+                {
+                    VisitValue(visitor);
+                }
+                finally
+                {
+                    PopPathSegment();
+                }
+
+                index++;
+                SkipWhitespace();
+                if (_position >= _json.Length)
+                    throw CreateParseException("Unexpected end of JSON in array.", _position, BJsonErrorCode.ParseUnexpectedEofInArray);
+
+                if (_json[_position] == ']')
+                {
+                    _position++;
+                    visitor.OnArrayEnd();
+                    return;
+                }
+
+                if (_json[_position] != ',')
+                    throw CreateParseException($"Expected ',' or ']' at position {_position}.", _position, BJsonErrorCode.ParseExpectedArraySeparator);
+
+                _position++;
+            }
+        }
+
+        private void VisitObject(BJsonTextVisitor visitor)
+        {
+            if (_json[_position] != '{')
+                throw CreateParseException($"Expected '{{' at position {_position}.", _position, BJsonErrorCode.ParseExpectedObjectStart);
+
+            visitor.OnObjectStart();
+            _position++;
+            SkipWhitespace();
+
+            if (_position < _json.Length && _json[_position] == '}')
+            {
+                _position++;
+                visitor.OnObjectEnd();
+                return;
+            }
+
+            int propertyIndex = 0;
+            var seenKeys = new HashSet<string>(StringComparer.Ordinal);
+
+            while (true)
+            {
+                SkipWhitespace();
+                if (_position >= _json.Length || _json[_position] != '"')
+                    throw CreateParseException($"Expected property name (string) at position {_position}.", _position, BJsonErrorCode.ParseExpectedPropertyName);
+
+                string key = ParseStringValue();
+                if (!seenKeys.Add(key))
+                    throw CreateParseException($"Duplicate key '{key}' in object at position {_position}.", _position, BJsonErrorCode.ParseDuplicateKey, new Dictionary<string, object?> { ["key"] = key });
+
+                visitor.OnObjectProperty(key, propertyIndex++);
+
+                SkipWhitespace();
+                if (_position >= _json.Length || _json[_position] != ':')
+                    throw CreateParseException($"Expected ':' after property name at position {_position}.", _position, BJsonErrorCode.ParseExpectedColon);
+
+                _position++;
+
+                PushPropertyPathSegment(key);
+                try
+                {
+                    VisitValue(visitor);
+                }
+                finally
+                {
+                    PopPathSegment();
+                }
+
+                SkipWhitespace();
+                if (_position >= _json.Length)
+                    throw CreateParseException("Unexpected end of JSON in object.", _position, BJsonErrorCode.ParseUnexpectedEofInObject);
+
+                if (_json[_position] == '}')
+                {
+                    _position++;
+                    visitor.OnObjectEnd();
+                    return;
+                }
+
+                if (_json[_position] != ',')
+                    throw CreateParseException($"Expected ',' or '}}' at position {_position}.", _position, BJsonErrorCode.ParseExpectedObjectSeparator);
+
+                _position++;
+            }
+        }
+
+        private void EmitScalarNumber(BJsonTextVisitor visitor, BJsonValue number)
+        {
+            if (number.Type == BJsonValueType.Float)
+            {
+                visitor.OnFloat(number.DoubleValue);
+                return;
+            }
+
+            long signed = unchecked((long)number.ULongValue);
+            if (signed < 0)
+                visitor.OnSignedInteger(signed);
+            else
+                visitor.OnUnsignedInteger(number.ULongValue);
+        }
+
+        private void SkipValue()
+        {
+            SkipWhitespace();
+            if (_position >= _json.Length)
+                throw CreateParseException("Unexpected end of JSON.", _position, BJsonErrorCode.ParseUnexpectedEof);
+
+            char c = _json[_position];
+            if (c == 'n')
+            {
+                ParseNull();
+                return;
+            }
+
+            if (c == 't' || c == 'f')
+            {
+                ParseBoolean();
+                return;
+            }
+
+            if (c == '"')
+            {
+                SkipStringToken();
+                return;
+            }
+
+            if (c == '[')
+            {
+                _position++;
+                SkipArrayBody();
+                return;
+            }
+
+            if (c == '{')
+            {
+                _position++;
+                SkipObjectBody();
+                return;
+            }
+
+            if (c == '-' || char.IsDigit(c))
+            {
+                ParseNumberToken(out _, out _, out _);
+                return;
+            }
+
+            throw CreateParseException(
+                $"Unexpected character at position {_position}: '{c}'",
+                _position,
+                BJsonErrorCode.ParseUnexpectedChar,
+                new Dictionary<string, object?> { ["found"] = c.ToString() });
+        }
+
+        private void SkipArrayBody()
+        {
+            SkipWhitespace();
+            if (_position < _json.Length && _json[_position] == ']')
+            {
+                _position++;
+                return;
+            }
+
+            int index = 0;
+            while (true)
+            {
+                PushIndexPathSegment(index);
+                try
+                {
+                    SkipValue();
+                }
+                finally
+                {
+                    PopPathSegment();
+                }
+
+                index++;
+                SkipWhitespace();
+                if (_position >= _json.Length)
+                    throw CreateParseException("Unexpected end of JSON in array.", _position, BJsonErrorCode.ParseUnexpectedEofInArray);
+
+                if (_json[_position] == ']')
+                {
+                    _position++;
+                    return;
+                }
+
+                if (_json[_position] != ',')
+                    throw CreateParseException($"Expected ',' or ']' at position {_position}.", _position, BJsonErrorCode.ParseExpectedArraySeparator);
+
+                _position++;
+            }
+        }
+
+        private void SkipObjectBody()
+        {
+            SkipWhitespace();
+            if (_position < _json.Length && _json[_position] == '}')
+            {
+                _position++;
+                return;
+            }
+
+            var seenKeys = new HashSet<string>(StringComparer.Ordinal);
+
+            while (true)
+            {
+                SkipWhitespace();
+                if (_position >= _json.Length || _json[_position] != '"')
+                    throw CreateParseException($"Expected property name (string) at position {_position}.", _position, BJsonErrorCode.ParseExpectedPropertyName);
+
+                string key = ParseStringValue();
+                if (!seenKeys.Add(key))
+                    throw CreateParseException($"Duplicate key '{key}' in object at position {_position}.", _position, BJsonErrorCode.ParseDuplicateKey, new Dictionary<string, object?> { ["key"] = key });
+
+                SkipWhitespace();
+                if (_position >= _json.Length || _json[_position] != ':')
+                    throw CreateParseException($"Expected ':' after property name at position {_position}.", _position, BJsonErrorCode.ParseExpectedColon);
+
+                _position++;
+                PushPropertyPathSegment(key);
+                try
+                {
+                    SkipValue();
+                }
+                finally
+                {
+                    PopPathSegment();
+                }
+
+                SkipWhitespace();
+                if (_position >= _json.Length)
+                    throw CreateParseException("Unexpected end of JSON in object.", _position, BJsonErrorCode.ParseUnexpectedEofInObject);
+
+                if (_json[_position] == '}')
+                {
+                    _position++;
+                    return;
+                }
+
+                if (_json[_position] != ',')
+                    throw CreateParseException($"Expected ',' or '}}' at position {_position}.", _position, BJsonErrorCode.ParseExpectedObjectSeparator);
+
+                _position++;
+            }
+        }
+
+        private void SkipStringToken()
+        {
+            if (_json[_position] != '"')
+                throw CreateParseException($"Expected '\"' at position {_position}.", _position, BJsonErrorCode.ParseExpectedStringStart);
+
+            _position++;
+            while (_position < _json.Length)
+            {
+                char c = _json[_position];
+                if (c == '"')
+                {
+                    _position++;
+                    return;
+                }
+
+                if (c == '\\')
+                {
+                    _position++;
+                    if (_position >= _json.Length)
+                        throw CreateParseException("Unexpected end of JSON in string escape.", _position, BJsonErrorCode.ParseUnexpectedEofInEscape);
+
+                    char escaped = _json[_position++];
+                    switch (escaped)
+                    {
+                        case '"':
+                        case '\\':
+                        case '/':
+                        case 'b':
+                        case 'f':
+                        case 'n':
+                        case 'r':
+                        case 't':
+                            break;
+                        case 'u':
+                            _ = ParseUnicodeEscape();
+                            break;
+                        default:
+                            throw CreateParseException($"Invalid escape sequence '\\{escaped}' at position {_position - 1}.", _position - 1, BJsonErrorCode.ParseInvalidEscape, new Dictionary<string, object?> { ["escape"] = escaped.ToString() });
+                    }
+                }
+                else if (c < ' ')
+                {
+                    throw CreateParseException($"Unescaped control character (U+{((int)c):X4}) at position {_position}.", _position, BJsonErrorCode.ParseUnescapedControlChar, new Dictionary<string, object?> { ["codePoint"] = $"U+{((int)c):X4}" });
+                }
+                else
+                {
+                    _position++;
+                }
+            }
+
+            throw CreateParseException("Unterminated string.", _position, BJsonErrorCode.ParseUnterminatedString);
         }
 
         private void SkipWhitespace()
@@ -443,6 +1042,23 @@ namespace Krampus.BinJson.Text
 
             _position += literal.Length;
             return true;
+        }
+
+        private void EnsureEndOfJson()
+        {
+            SkipWhitespace();
+            if (_position < _json.Length)
+            {
+                throw CreateParseException(
+                    $"Unexpected character at position {_position}: expected end of JSON.",
+                    _position,
+                    errorCode: BJsonErrorCode.ParseUnexpectedTrailingChar,
+                    details: new Dictionary<string, object?>
+                    {
+                        ["expected"] = "end of JSON",
+                        ["found"] = _json[_position].ToString()
+                    });
+            }
         }
 
         private BJsonParseException CreateParseException(
@@ -558,6 +1174,18 @@ namespace Krampus.BinJson.Text
             }
 
             return true;
+        }
+
+        private static int ParseHexDigit(char c)
+        {
+            if (c >= '0' && c <= '9')
+                return c - '0';
+            if (c >= 'a' && c <= 'f')
+                return c - 'a' + 10;
+            if (c >= 'A' && c <= 'F')
+                return c - 'A' + 10;
+
+            return -1;
         }
 
         private readonly struct PathSegment

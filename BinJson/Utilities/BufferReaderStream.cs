@@ -4,6 +4,7 @@ using System;
 using System.Buffers;
 using System.IO;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 
 namespace Krampus.BinJson.Utilities
 {
@@ -12,12 +13,16 @@ namespace Krampus.BinJson.Utilities
         public const int DefaultBufferSize = 8192; // 8 KB
         private const int MaxBufferSize = 1024 * 1024; // 1 MB
 
-        private readonly Stream _stream;
+        private readonly Stream? _stream;
         private readonly bool _leaveOpen;
         private byte[] _buffer;
         private int _bufferPos;
         private int _bufferLen;
         private long _bytesRead;
+        private readonly bool _ownsPooledBuffer;
+        private readonly bool _isMemoryBacked;
+        private readonly int _memoryStart;
+        private readonly int _memoryEnd;
         private bool _disposed;
 
         public BufferReaderStream(Stream stream, bool leaveOpen = false, int bufferSize = DefaultBufferSize)
@@ -28,9 +33,40 @@ namespace Krampus.BinJson.Utilities
             _bufferPos = 0;
             _bufferLen = 0;
             _bytesRead = 0;
+            _ownsPooledBuffer = true;
+            _isMemoryBacked = false;
+            _memoryStart = 0;
+            _memoryEnd = 0;
         }
 
-        public long BytesRead => _bytesRead;
+        public BufferReaderStream(ReadOnlyMemory<byte> data)
+        {
+            _stream = null;
+            _leaveOpen = true;
+
+            if (MemoryMarshal.TryGetArray(data, out ArraySegment<byte> segment) && segment.Array is not null)
+            {
+                _buffer = segment.Array;
+                _bufferPos = segment.Offset;
+                _bufferLen = segment.Offset + segment.Count;
+                _memoryStart = segment.Offset;
+                _memoryEnd = _bufferLen;
+            }
+            else
+            {
+                _buffer = data.ToArray();
+                _bufferPos = 0;
+                _bufferLen = _buffer.Length;
+                _memoryStart = 0;
+                _memoryEnd = _bufferLen;
+            }
+
+            _bytesRead = 0;
+            _ownsPooledBuffer = false;
+            _isMemoryBacked = true;
+        }
+
+        public long BytesRead => _isMemoryBacked ? _bufferPos - _memoryStart : _bytesRead;
 
         public int BufferPos => _bufferPos;
         public int BufferSize => _bufferLen;
@@ -40,6 +76,13 @@ namespace Krampus.BinJson.Utilities
         public byte ReadByte()
         {
             ThrowIfDisposed();
+            if (_isMemoryBacked)
+            {
+                if (_bufferPos >= _memoryEnd)
+                    ThrowUnexpectedEnd(1, 0, "ReadByte");
+                return _buffer[_bufferPos++];
+            }
+
             if (_bufferPos >= _bufferLen)
                 FillBuffer(1);
             return _buffer[_bufferPos++];
@@ -48,6 +91,17 @@ namespace Krampus.BinJson.Utilities
         public ReadOnlySpan<byte> ReadSpanInline(int length)
         {
             ThrowIfDisposed();
+            if (_isMemoryBacked)
+            {
+                int available = _memoryEnd - _bufferPos;
+                if (available < length)
+                    ThrowUnexpectedEnd(length, available, "ReadSpanInline");
+
+                var inlineSpan = _buffer.AsSpan(_bufferPos, length);
+                _bufferPos += length;
+                return inlineSpan;
+            }
+
             if (_bufferLen - _bufferPos < length)
                 FillBuffer(length);
 
@@ -65,6 +119,17 @@ namespace Krampus.BinJson.Utilities
 
             if (length == 0)
                 return RentedBuffer.Empty;
+
+            if (_isMemoryBacked)
+            {
+                int available = _memoryEnd - _bufferPos;
+                if (available < length)
+                    ThrowUnexpectedEnd(length, available, "ReadRentedBuffer");
+
+                var inlineSpan = _buffer.AsSpan(_bufferPos, length);
+                _bufferPos += length;
+                return inlineSpan;
+            }
 
             if (_bufferLen - _bufferPos >= length)
             {
@@ -93,6 +158,16 @@ namespace Krampus.BinJson.Utilities
             if (length < 0)
                 throw new ArgumentOutOfRangeException(nameof(length));
 
+            if (_isMemoryBacked)
+            {
+                int available = _memoryEnd - _bufferPos;
+                if (available < length)
+                    ThrowUnexpectedEnd(length, available, "Skip");
+
+                _bufferPos += length;
+                return;
+            }
+
             while (length > 0)
             {
                 int available = _bufferLen - _bufferPos;
@@ -107,7 +182,7 @@ namespace Krampus.BinJson.Utilities
                 _bufferPos = 0;
                 _bufferLen = 0;
 
-                if (length > _buffer.Length && _stream.CanSeek)
+                if (length > _buffer.Length && _stream is not null && _stream.CanSeek)
                 {
                     _stream.Seek(length, SeekOrigin.Current);
                     _bytesRead += length;
@@ -120,6 +195,9 @@ namespace Krampus.BinJson.Utilities
 
         private void FillBuffer(int minimumBytes)
         {
+            if (_stream is null)
+                throw new InvalidOperationException("Cannot refill a memory-backed reader.");
+
             int remaining = _bufferLen - _bufferPos;
             if (remaining > 0)
                 Array.Copy(_buffer, _bufferPos, _buffer, 0, remaining);
@@ -139,6 +217,9 @@ namespace Krampus.BinJson.Utilities
 
         private void ReadExactly(byte[] destination, int length)
         {
+            if (_stream is null)
+                throw new InvalidOperationException("Cannot read exactly from a memory-backed reader stream.");
+
             int totalRead = 0;
 
             // First, read from the buffer if there's any data available
@@ -179,13 +260,13 @@ namespace Krampus.BinJson.Utilities
             if (_disposed)
                 return;
 
-            if (_buffer != null)
+            if (_ownsPooledBuffer && _buffer != null)
             {
                 ArrayPool<byte>.Shared.Return(_buffer);
                 _buffer = null!;
             }
 
-            if (!_leaveOpen)
+            if (_stream is not null && !_leaveOpen)
                 _stream.Dispose();
 
             _disposed = true;

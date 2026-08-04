@@ -1,6 +1,7 @@
 #nullable enable
 
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using Krampus.BinJson.Error;
@@ -60,6 +61,21 @@ namespace Krampus.BinJson.Text
 
             using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true, bufferSize: 1024, leaveOpen: leaveOpen);
             return Deserialize(reader, options, leaveOpen: false);
+        }
+
+        public static void Visit(string json, BJsonTextVisitor visitor, BJsonTextReaderOptions? options = null)
+        {
+            JsonTextParser.Visit(json, visitor, options);
+        }
+
+        public static bool TryReadRootObjectProperty(string json, string propertyName, out BJsonValue value, BJsonTextReaderOptions? options = null)
+        {
+            return JsonTextParser.TryReadRootObjectProperty(json, propertyName, out value, options);
+        }
+
+        public static BJsonObject ReadRootObjectProperties(string json, IReadOnlyList<string> propertyNames, BJsonTextReaderOptions? options = null)
+        {
+            return JsonTextParser.ReadRootObjectProperties(json, propertyNames, options);
         }
 
     }

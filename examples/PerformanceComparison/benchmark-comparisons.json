@@ -1,0 +1,272 @@
+﻿[
+    {
+        "Group":  "Text mode",
+        "Label":  "Text small parse DOM -\u003e visit",
+        "Baseline":  "Text small object parse DOM",
+        "Contender":  "Text small object visit no DOM",
+        "ThroughputDeltaPct":  50.301,
+        "TimeReductionPct":  33.402,
+        "AllocationReductionPct":  27.568
+    },
+    {
+        "Group":  "Text mode",
+        "Label":  "Text repeated parse DOM -\u003e visit",
+        "Baseline":  "Text repeated object parse DOM",
+        "Contender":  "Text repeated object visit no DOM",
+        "ThroughputDeltaPct":  9.6,
+        "TimeReductionPct":  8.814,
+        "AllocationReductionPct":  24.519
+    },
+    {
+        "Group":  "Text mode",
+        "Label":  "Text wide parse DOM -\u003e selective 1",
+        "Baseline":  "Text wide root parse DOM",
+        "Contender":  "Text wide root selective property read",
+        "ThroughputDeltaPct":  -48.418,
+        "TimeReductionPct":  -93.542,
+        "AllocationReductionPct":  85.669
+    },
+    {
+        "Group":  "Text mode",
+        "Label":  "Text wide parse DOM -\u003e selective 8",
+        "Baseline":  "Text wide root parse DOM",
+        "Contender":  "Text wide root selective 8 properties (one pass)",
+        "ThroughputDeltaPct":  -49.518,
+        "TimeReductionPct":  -97.73,
+        "AllocationReductionPct":  80.432
+    },
+    {
+        "Group":  "Text mode",
+        "Label":  "Text repeated sync parse DOM -\u003e async parse",
+        "Baseline":  "Text repeated object parse DOM",
+        "Contender":  "Text async parse from stream",
+        "ThroughputDeltaPct":  -10.863,
+        "TimeReductionPct":  -12.316,
+        "AllocationReductionPct":  -48.44
+    },
+    {
+        "Group":  "Text mode",
+        "Label":  "Text repeated sync serialize -\u003e async write",
+        "Baseline":  "Text repeated object serialize compact",
+        "Contender":  "Text async write to StringWriter",
+        "ThroughputDeltaPct":  -2.799,
+        "TimeReductionPct":  -2.817,
+        "AllocationReductionPct":  -28.2
+    },
+    {
+        "Group":  "Text mode",
+        "Label":  "Text async write StringWriter -\u003e MemoryStream",
+        "Baseline":  "Text async write to StringWriter",
+        "Contender":  "Text async write to MemoryStream UTF8",
+        "ThroughputDeltaPct":  -12.41,
+        "TimeReductionPct":  -15.31,
+        "AllocationReductionPct":  -19.82
+    },
+    {
+        "Group":  "Binary mode",
+        "Label":  "Binary small DOM -\u003e visit",
+        "Baseline":  "Small object deserialize DOM",
+        "Contender":  "Small object visit no DOM",
+        "ThroughputDeltaPct":  -8.759,
+        "TimeReductionPct":  -8.146,
+        "AllocationReductionPct":  17.816
+    },
+    {
+        "Group":  "Binary mode",
+        "Label":  "Binary repeated table DOM -\u003e visit",
+        "Baseline":  "Repeated strings deserialize DOM with string table",
+        "Contender":  "Repeated strings visit no DOM with string table",
+        "ThroughputDeltaPct":  211.507,
+        "TimeReductionPct":  67.909,
+        "AllocationReductionPct":  13.065
+    },
+    {
+        "Group":  "Binary mode",
+        "Label":  "Binary repeated no-table DOM -\u003e visit",
+        "Baseline":  "Repeated strings deserialize DOM without string table",
+        "Contender":  "Repeated strings visit no DOM without string table",
+        "ThroughputDeltaPct":  -1.169,
+        "TimeReductionPct":  -1.151,
+        "AllocationReductionPct":  7.275
+    },
+    {
+        "Group":  "Binary mode",
+        "Label":  "Binary packed DOM -\u003e visit",
+        "Baseline":  "Packed numeric array deserialize DOM",
+        "Contender":  "Packed numeric array visit no DOM",
+        "ThroughputDeltaPct":  88.198,
+        "TimeReductionPct":  46.695,
+        "AllocationReductionPct":  99.775
+    },
+    {
+        "Group":  "Binary mode",
+        "Label":  "Binary large payload DOM -\u003e visit",
+        "Baseline":  "Large binary payload deserialize DOM",
+        "Contender":  "Large binary payload visit no DOM",
+        "ThroughputDeltaPct":  3235.294,
+        "TimeReductionPct":  97.062,
+        "AllocationReductionPct":  99.781
+    },
+    {
+        "Group":  "Binary mode",
+        "Label":  "Binary wide DOM -\u003e selective 1",
+        "Baseline":  "Wide root object deserialize DOM",
+        "Contender":  "Wide root object selective property read",
+        "ThroughputDeltaPct":  -17.455,
+        "TimeReductionPct":  -21.443,
+        "AllocationReductionPct":  98.481
+    },
+    {
+        "Group":  "Binary mode",
+        "Label":  "Binary wide DOM -\u003e selective 8",
+        "Baseline":  "Wide root object deserialize DOM",
+        "Contender":  "Wide root object selective 8 properties (one pass)",
+        "ThroughputDeltaPct":  -34.91,
+        "TimeReductionPct":  -53.586,
+        "AllocationReductionPct":  92.614
+    },
+    {
+        "Group":  "Binary mode",
+        "Label":  "Binary repeated sync read DOM -\u003e async read memory",
+        "Baseline":  "Repeated strings deserialize DOM with string table",
+        "Contender":  "Async read from ReadOnlyMemory to DOM",
+        "ThroughputDeltaPct":  22.728,
+        "TimeReductionPct":  18.578,
+        "AllocationReductionPct":  -14.528
+    },
+    {
+        "Group":  "Binary mode",
+        "Label":  "Binary repeated sync read DOM -\u003e async read stream",
+        "Baseline":  "Repeated strings deserialize DOM with string table",
+        "Contender":  "Async read from stream to DOM",
+        "ThroughputDeltaPct":  174.275,
+        "TimeReductionPct":  63.566,
+        "AllocationReductionPct":  -5.301
+    },
+    {
+        "Group":  "Binary mode",
+        "Label":  "Binary repeated sync serialize -\u003e async write",
+        "Baseline":  "Repeated strings serialize with string table",
+        "Contender":  "Async stream write serialize to MemoryStream",
+        "ThroughputDeltaPct":  8.536,
+        "TimeReductionPct":  10.263,
+        "AllocationReductionPct":  64.564
+    },
+    {
+        "Group":  "Text vs Binary",
+        "Label":  "Small serialize: Text vs Binary",
+        "Baseline":  "Text small object serialize",
+        "Contender":  "Small object serialize",
+        "ThroughputDeltaPct":  -19.949,
+        "TimeReductionPct":  -24.812,
+        "AllocationReductionPct":  -99.231
+    },
+    {
+        "Group":  "Text vs Binary",
+        "Label":  "Small parse DOM: Text vs Binary",
+        "Baseline":  "Text small object parse DOM",
+        "Contender":  "Small object deserialize DOM",
+        "ThroughputDeltaPct":  119.703,
+        "TimeReductionPct":  53.889,
+        "AllocationReductionPct":  5.946
+    },
+    {
+        "Group":  "Text vs Binary",
+        "Label":  "Small visit no DOM: Text vs Binary",
+        "Baseline":  "Text small object visit no DOM",
+        "Contender":  "Small object visit no DOM",
+        "ThroughputDeltaPct":  33.371,
+        "TimeReductionPct":  25.122,
+        "AllocationReductionPct":  -6.716
+    },
+    {
+        "Group":  "Text vs Binary",
+        "Label":  "Repeated serialize: Text compact vs Binary with table",
+        "Baseline":  "Text repeated object serialize compact",
+        "Contender":  "Repeated strings serialize with string table",
+        "ThroughputDeltaPct":  -53.215,
+        "TimeReductionPct":  -119.618,
+        "AllocationReductionPct":  57.354
+    },
+    {
+        "Group":  "Text vs Binary",
+        "Label":  "Repeated serialize: Text compact vs Binary without table",
+        "Baseline":  "Text repeated object serialize compact",
+        "Contender":  "Repeated strings serialize without string table",
+        "ThroughputDeltaPct":  -40.886,
+        "TimeReductionPct":  -69.241,
+        "AllocationReductionPct":  61.118
+    },
+    {
+        "Group":  "Text vs Binary",
+        "Label":  "Repeated parse DOM: Text vs Binary (with table)",
+        "Baseline":  "Text repeated object parse DOM",
+        "Contender":  "Repeated strings deserialize DOM with string table",
+        "ThroughputDeltaPct":  -49.992,
+        "TimeReductionPct":  -99.987,
+        "AllocationReductionPct":  54.654
+    },
+    {
+        "Group":  "Text vs Binary",
+        "Label":  "Repeated parse DOM: Text vs Binary (without table)",
+        "Baseline":  "Text repeated object parse DOM",
+        "Contender":  "Repeated strings deserialize DOM without string table",
+        "ThroughputDeltaPct":  7.902,
+        "TimeReductionPct":  7.362,
+        "AllocationReductionPct":  18.565
+    },
+    {
+        "Group":  "Text vs Binary",
+        "Label":  "Repeated visit no DOM: Text vs Binary (with table)",
+        "Baseline":  "Text repeated object visit no DOM",
+        "Contender":  "Repeated strings visit no DOM with string table",
+        "ThroughputDeltaPct":  42.133,
+        "TimeReductionPct":  29.618,
+        "AllocationReductionPct":  47.772
+    },
+    {
+        "Group":  "Text vs Binary",
+        "Label":  "Repeated visit no DOM: Text vs Binary (without table)",
+        "Baseline":  "Text repeated object visit no DOM",
+        "Contender":  "Repeated strings visit no DOM without string table",
+        "ThroughputDeltaPct":  -2.7,
+        "TimeReductionPct":  -2.762,
+        "AllocationReductionPct":  -0.039
+    },
+    {
+        "Group":  "Text vs Binary",
+        "Label":  "Wide selective 1: Text vs Binary",
+        "Baseline":  "Text wide root selective property read",
+        "Contender":  "Wide root object selective property read",
+        "ThroughputDeltaPct":  79.965,
+        "TimeReductionPct":  44.282,
+        "AllocationReductionPct":  91.453
+    },
+    {
+        "Group":  "Text vs Binary",
+        "Label":  "Wide selective 8: Text vs Binary",
+        "Baseline":  "Text wide root selective 8 properties (one pass)",
+        "Contender":  "Wide root object selective 8 properties (one pass)",
+        "ThroughputDeltaPct":  45,
+        "TimeReductionPct":  31.027,
+        "AllocationReductionPct":  69.558
+    },
+    {
+        "Group":  "Text vs Binary",
+        "Label":  "Async write stream parity: Text vs Binary",
+        "Baseline":  "Text async write to MemoryStream UTF8",
+        "Contender":  "Async stream write serialize to MemoryStream",
+        "ThroughputDeltaPct":  -40.357,
+        "TimeReductionPct":  -66.228,
+        "AllocationReductionPct":  90.162
+    },
+    {
+        "Group":  "Text vs Binary",
+        "Label":  "Async parse/read stream parity: Text vs Binary",
+        "Baseline":  "Text async parse from stream",
+        "Contender":  "Async read from stream to DOM",
+        "ThroughputDeltaPct":  53.873,
+        "TimeReductionPct":  35.126,
+        "AllocationReductionPct":  67.832
+    }
+]

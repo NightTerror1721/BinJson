@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using Krampus.BinJson;
 using Krampus.BinJson.Text;
@@ -274,6 +275,104 @@ namespace Krampus.BinJson.Tests
 
             Assert.True(value.IsObject);
             Assert.Equal(BJsonValue.Create("hero"), value.ObjectValue["name"]);
+        }
+
+        [Fact]
+        public void VisitText_TraversesWithoutDom()
+        {
+            const string json = "{\"id\":42,\"active\":true,\"name\":\"Neo\",\"items\":[1,2.5,null]}";
+            var visitor = new RecordingTextVisitor();
+
+            BJsonTextReader.Visit(json, visitor);
+
+            Assert.Contains("doc:start", visitor.Events);
+            Assert.Contains("obj:start", visitor.Events);
+            Assert.Contains("prop:0:id", visitor.Events);
+            Assert.Contains("u64:42", visitor.Events);
+            Assert.Contains("prop:1:active", visitor.Events);
+            Assert.Contains("bool:True", visitor.Events);
+            Assert.Contains("prop:2:name", visitor.Events);
+            Assert.Contains("str:Neo", visitor.Events);
+            Assert.Contains("prop:3:items", visitor.Events);
+            Assert.Contains("arr:start", visitor.Events);
+            Assert.Contains("u64:1", visitor.Events);
+            Assert.Contains("f64:2.5", visitor.Events);
+            Assert.Contains("null", visitor.Events);
+            Assert.Contains("arr:end", visitor.Events);
+            Assert.Contains("obj:end", visitor.Events);
+            Assert.Contains("doc:end", visitor.Events);
+        }
+
+        [Fact]
+        public void TryReadRootObjectProperty_ReadsOnlyTargetProperty()
+        {
+            const string json = "{\"a\":1,\"target\":{\"ok\":true},\"b\":[1,2,3]}";
+
+            bool found = BJsonTextReader.TryReadRootObjectProperty(json, "target", out var value);
+
+            Assert.True(found);
+            Assert.True(value.IsObject);
+            Assert.Equal(BJsonValue.True, value.ObjectValue["ok"]);
+        }
+
+        [Fact]
+        public void TryReadRootObjectProperty_ReturnsFalseWhenMissing()
+        {
+            const string json = "{\"a\":1,\"b\":2}";
+
+            bool found = BJsonTextReader.TryReadRootObjectProperty(json, "missing", out var value);
+
+            Assert.False(found);
+            Assert.True(value.IsNull);
+        }
+
+        [Fact]
+        public void ReadRootObjectProperties_ReturnsSelectedSubset()
+        {
+            const string json = "{\"id\":7,\"name\":\"Ada\",\"meta\":{\"level\":3},\"enabled\":true}";
+
+            var selected = BJsonTextReader.ReadRootObjectProperties(json, new[] { "meta", "id" });
+
+            Assert.Equal(2, selected.Count);
+            Assert.True(selected.TryGetValue("id", out var id));
+            Assert.Equal(BJsonValue.Create(7), id);
+            Assert.True(selected.TryGetValue("meta", out var meta));
+            Assert.True(meta.IsObject);
+            Assert.Equal(BJsonValue.Create(3), meta.ObjectValue["level"]);
+        }
+
+        [Fact]
+        public void Facade_TextSelectiveApis_Work()
+        {
+            const string json = "{\"x\":1,\"keep\":\"yes\",\"z\":3}";
+
+            bool found = BJson.TryReadTextRootObjectProperty(json, "keep", out var value);
+            var subset = BJson.ReadTextRootObjectProperties(json, new[] { "keep", "z" });
+
+            Assert.True(found);
+            Assert.Equal(BJsonValue.Create("yes"), value);
+            Assert.Equal(2, subset.Count);
+            Assert.Equal(BJsonValue.Create("yes"), subset["keep"]);
+            Assert.Equal(BJsonValue.Create(3), subset["z"]);
+        }
+
+        private sealed class RecordingTextVisitor : BJsonTextVisitor
+        {
+            public List<string> Events { get; } = new List<string>();
+
+            public override void OnDocumentStart() => Events.Add("doc:start");
+            public override void OnDocumentEnd() => Events.Add("doc:end");
+            public override void OnNull() => Events.Add("null");
+            public override void OnBoolean(bool value) => Events.Add("bool:" + value.ToString());
+            public override void OnSignedInteger(long value) => Events.Add("i64:" + value.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            public override void OnUnsignedInteger(ulong value) => Events.Add("u64:" + value.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            public override void OnFloat(double value) => Events.Add("f64:" + value.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            public override void OnString(string value) => Events.Add("str:" + value);
+            public override void OnArrayStart() => Events.Add("arr:start");
+            public override void OnArrayEnd() => Events.Add("arr:end");
+            public override void OnObjectStart() => Events.Add("obj:start");
+            public override void OnObjectProperty(string propertyName, int index) => Events.Add("prop:" + index.ToString(System.Globalization.CultureInfo.InvariantCulture) + ":" + propertyName);
+            public override void OnObjectEnd() => Events.Add("obj:end");
         }
     }
 }

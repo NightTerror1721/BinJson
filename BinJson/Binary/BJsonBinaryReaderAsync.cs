@@ -16,12 +16,42 @@ namespace Krampus.BinJson.Binary
 
         public async Task<BJsonValue> ReadAsync(CancellationToken cancellationToken = default)
         {
+            if (TryGetReadableMemory(Stream, out ReadOnlyMemory<byte> data, out MemoryStream? memoryStream))
+            {
+                using var core = new BJsonBinaryReaderCore(data, Options);
+                BJsonValue value = core.Read();
+                if (memoryStream is not null)
+                    memoryStream.Position += core.BytesRead;
+
+                return value;
+            }
+
+            if (Stream.CanSeek)
+            {
+                long remaining = Stream.Length - Stream.Position;
+                if (remaining >= 0 && remaining <= int.MaxValue)
+                {
+                    byte[] dataBuffer = new byte[(int)remaining];
+                    int totalRead = 0;
+                    while (totalRead < dataBuffer.Length)
+                    {
+                        int read = await Stream.ReadAsync(dataBuffer.AsMemory(totalRead), cancellationToken).ConfigureAwait(false);
+                        if (read == 0)
+                            break;
+
+                        totalRead += read;
+                    }
+
+                    using var core = new BJsonBinaryReaderCore(dataBuffer.AsMemory(0, totalRead), Options);
+                    return core.Read();
+                }
+            }
+
             using var memory = new MemoryStream();
             await Stream.CopyToAsync(memory, 81920, cancellationToken).ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
-            memory.Position = 0;
-            using var core = new BJsonBinaryReaderCore(memory, leaveOpen: true, Options);
-            return core.Read();
+            using var fallbackCore = new BJsonBinaryReaderCore(memory.ToArray(), Options);
+            return fallbackCore.Read();
         }
 
         public static async Task<BJsonValue> DeserializeAsync(Stream stream, bool leaveOpen = false, CancellationToken cancellationToken = default, BJsonBinaryReaderOptions? options = null)
@@ -30,14 +60,29 @@ namespace Krampus.BinJson.Binary
             return await reader.ReadAsync(cancellationToken).ConfigureAwait(false);
         }
 
-        public static async Task<BJsonValue> DeserializeAsync(ReadOnlyMemory<byte> data, CancellationToken cancellationToken = default, BJsonBinaryReaderOptions? options = null)
+        public static Task<BJsonValue> DeserializeAsync(ReadOnlyMemory<byte> data, CancellationToken cancellationToken = default, BJsonBinaryReaderOptions? options = null)
         {
             if (cancellationToken.IsCancellationRequested)
-                return await Task.FromCanceled<BJsonValue>(cancellationToken).ConfigureAwait(false);
+                return Task.FromCanceled<BJsonValue>(cancellationToken);
 
-            using var stream = new MemoryStream(data.ToArray(), writable: false);
-            using var reader = new BJsonBinaryReaderAsync(stream, leaveOpen: true, options);
-            return await reader.ReadAsync(cancellationToken).ConfigureAwait(false);
+            using var core = new BJsonBinaryReaderCore(data, options);
+            return Task.FromResult(core.Read());
+        }
+
+        private static bool TryGetReadableMemory(Stream stream, out ReadOnlyMemory<byte> data, out MemoryStream? memoryStream)
+        {
+            if (stream is MemoryStream candidate && candidate.TryGetBuffer(out ArraySegment<byte> segment))
+            {
+                int offset = checked((int)candidate.Position);
+                int count = checked((int)(candidate.Length - candidate.Position));
+                data = segment.AsMemory(segment.Offset + offset, count);
+                memoryStream = candidate;
+                return true;
+            }
+
+            data = default;
+            memoryStream = null;
+            return false;
         }
     }
 }
